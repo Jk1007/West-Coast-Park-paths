@@ -1,4 +1,4 @@
-# wcp_solara.py — West Coast Park evac (typed location → hazards) + expected impact envelope
+# wcp_solara.py — West Coast Park evac (typed location → hazards) + nearest safe zones
 # Run:  python -m solara run wcp_solara.py
 import plotly.graph_objects as go
 import asyncio
@@ -51,12 +51,12 @@ num_people = sl.reactive(200)
 pct_cyclists = sl.reactive(15)
 
 # Physical hazard growth (actual circle that advances each step)
-hazard_radius = sl.reactive(40.0)     # meters (initial radius of new hazard)
-hazard_spread = sl.reactive(1.2)      # meters per step (actual circle growth)
+hazard_radius = sl.reactive(40.0)     # m (initial radius of a new hazard)
+hazard_spread = sl.reactive(1.2)      # m/step (actual circle growth)
 
 # Expected impact envelope (who should be evacuated)
-expected_growth_m = sl.reactive(3.0)  # meters per step (envelope growth)
-expected_buffer_m = sl.reactive(0.0)  # meters (static buffer on envelope)
+expected_growth_m = sl.reactive(3.0)  # m/step (envelope growth)
+expected_buffer_m = sl.reactive(0.0)  # m (static buffer on envelope)
 
 # Wind / awareness
 wind_deg = sl.reactive(45.0)          # 0=E, 90=N
@@ -78,12 +78,18 @@ plume_grid = sl.reactive(90)          # rows
 PEOPLE = []
 HAZARDS = []   # dicts: {"id": int, "pos": np.array([x,y]) in map units, "r_m": float}
 HAZARD_ID = 0
+SAFE_NODES = []    # list of node ids treated as "safe zones"
+N_SAFE = 12        # how many safe nodes to mark
 rng = np.random.default_rng(42)
 
 # -------------------- HELPERS --------------------
 def _nx_path(u_node, v_node):
     try: return nx.shortest_path(UG, u_node, v_node, weight="weight")
     except nx.NetworkXNoPath: return [u_node, v_node]
+
+def _nx_path_length(u_node, v_node):
+    try: return nx.shortest_path_length(UG, u_node, v_node, weight="weight")
+    except nx.NetworkXNoPath: return float("inf")
 
 def _nearest_node_idx(x, y):
     _, idx = KD.query([x, y]); return idx, NODE_IDS[idx]
@@ -158,13 +164,44 @@ def _point_from_phrase(phrase: str):
         return np.array(centers["center"], dtype=float)
     return None
 
+# -------------------- SAFE ZONE COMPUTATION --------------------
+def _recompute_safe_nodes():
+    """Choose N safest nodes (farthest from hazards) as 'safe zones'."""
+    global SAFE_NODES
+    if len(NODE_POS) == 0:
+        SAFE_NODES = []
+        return
+    if not HAZARDS:
+        # No hazards yet → choose extreme nodes around the perimeter by distance to center
+        center = NODE_POS.mean(axis=0)
+        scores = np.array([map_distance_m(pt, center) for pt in NODE_POS], dtype=float)
+    else:
+        # Score = min distance to any hazard (meters) – bigger is safer
+        scores = np.empty(NODE_POS.shape[0], dtype=float)
+        for i, (x, y) in enumerate(NODE_POS):
+            pt = np.array([x, y], dtype=float)
+            _, mn = _nearest_hazard_m(pt)
+            scores[i] = mn
+    order = np.argsort(-scores)
+    SAFE_NODES = [NODE_IDS[i] for i in order[:N_SAFE]]
+
+def _nearest_safe_node_from(node_id):
+    """Return safe node with smallest network distance from node_id."""
+    if not SAFE_NODES:
+        return node_id
+    best_target, best_len = None, float("inf")
+    for t in SAFE_NODES:
+        L = _nx_path_length(node_id, t)
+        if L < best_len:
+            best_len, best_target = L, t
+    return best_target if best_target is not None else node_id
+
 # -------------------- AFFECTED-ENVELOPE TEST --------------------
 def _is_person_expected_affected(pt_xy, t):
     """Return True if person at pt_xy should evacuate under expected envelope at time t."""
     if not HAZARDS: return False
     h, d_m = _nearest_hazard_m(pt_xy)
     if h is None: return False
-    # envelope grows independently of the physical hazard (can be conservative)
     expected_r = float(h["r_m"]) + float(expected_growth_m.value) * float(t) + float(expected_buffer_m.value)
     return d_m <= max(0.0, expected_r)
 
@@ -183,36 +220,30 @@ def _spawn_people(n):
         base_speed = rng.normal(4.5, 0.6) if is_cyclist else rng.normal(2.0, 0.4)
         base_speed = float(np.clip(base_speed, 3.0 if is_cyclist else 1.2, 6.0 if is_cyclist else 3.5))
         panic_threshold = float(rng.uniform(0.3, 0.8))
-        # awareness delay is only used once a person is in the affected envelope
         new_people.append({
             "pos": pos2d, "dir": np.array([0.0, 0.0]),
             "is_cyclist": is_cyclist, "base_speed": base_speed, "speed": base_speed,
             "panic": 0.0, "panic_thr": panic_threshold,
             "aware": False, "aware_delay": float(base_awareness_lag.value + rng.uniform(-2, 2)),
             "reached": False, "target_node": None, "path": [], "path_idx": 0,
+            # store when they first become affected
+            "affected_since": None,
         })
     PEOPLE.extend(new_people)
 
+def _retarget_to_nearest_safe(p):
+    """Pick nearest SAFE_NODE from the person's current nearest node and compute path."""
+    s_idx, s_node = _nearest_node_idx(p["pos"][0], p["pos"][1])
+    t_node = _nearest_safe_node_from(s_node)
+    p["target_node"] = t_node
+    p["path"] = _nx_path(s_node, t_node)
+    p["path_idx"] = 0
+
 def _choose_targets_and_paths():
-    if len(NODE_POS) == 0 or not PEOPLE: return
-    # Safety score: farthest from hazards
-    if HAZARDS:
-        safety = np.empty(NODE_POS.shape[0], dtype=float)
-        for i, (x, y) in enumerate(NODE_POS):
-            pt = np.array([x, y], dtype=float)
-            _, mn = _nearest_hazard_m(pt)
-            safety[i] = mn
-    else:
-        center = NODE_POS.mean(axis=0)
-        safety = np.array([map_distance_m(pt, center) for pt in NODE_POS], dtype=float)
-    candidates = np.argsort(-safety)[:100]
+    # Refresh global SAFE_NODES whenever hazards/people change
+    _recompute_safe_nodes()
     for p in PEOPLE:
-        _, s_node = _nearest_node_idx(p["pos"][0], p["pos"][1])
-        t_idx = int(candidates[rng.integers(0, len(candidates))])
-        t_node = NODE_IDS[t_idx]
-        p["target_node"] = t_node
-        p["path"] = _nx_path(s_node, t_node)
-        p["path_idx"] = 0
+        _retarget_to_nearest_safe(p)
 
 def reset_model():
     global PEOPLE
@@ -223,7 +254,7 @@ def reset_model():
 
 # -------------------- DYNAMICS --------------------
 def _update_panic(p):
-    # Panic only matters for evacuating people
+    # Panic only for evacuating people
     p["panic"] = min(1.0, p["panic"] + 0.02)
     if (not p["is_cyclist"]) and (p["panic"] > p["panic_thr"]):
         p["speed"] = p["base_speed"] * (1 + p["panic"] * 0.3)
@@ -240,13 +271,14 @@ def _advance_hazards():
     for h in HAZARDS:
         h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
         h["r_m"] = float(h["r_m"] + dr_m)
+    # hazard motion changes safety → recompute safe nodes
+    _recompute_safe_nodes()
 
 def _step_once():
     _advance_hazards()
     tnow = float(tick.value)
 
     for p in PEOPLE:
-        # decide if this person should be evacuated under expected envelope
         affected = _is_person_expected_affected(p["pos"], tnow)
 
         if not affected:
@@ -255,12 +287,13 @@ def _step_once():
             p["dir"] = np.array([0.0, 0.0])
             continue
 
-        # affected path-goers: honor awareness lag *after* becoming affected
+        # affected: set affected_since once, honor awareness lag, then move
+        if p["affected_since"] is None:
+            p["affected_since"] = tnow
+            # when first affected, retarget to nearest SAFE_NODE
+            _retarget_to_nearest_safe(p)
+
         if not p["aware"]:
-            # time-based lag: start moving once tick surpasses per-person lag since first affected
-            # we store the first-affected tick in the person dict the first time they’re affected
-            if "affected_since" not in p:
-                p["affected_since"] = tnow
             if (tnow - p["affected_since"]) < max(0.0, p["aware_delay"]):
                 p["dir"] = np.array([0.0, 0.0])
                 continue
@@ -333,7 +366,7 @@ def agents_df():
         else:
             affected = _is_person_expected_affected(p["pos"], tnow)
             if not affected:
-                colors.append("steelblue")  # unaffected, do not move
+                colors.append("steelblue")  # unaffected, static
             else:
                 h, d_m = _nearest_hazard_m(p["pos"])
                 r_m = _hazard_radius_at(h) if h is not None else 0.0
@@ -379,8 +412,7 @@ def _plume_concentration_grid(x_domain, y_domain):
             dx_map = X - hx; dy_map = Y - hy
             dx_m = dx_map_to_m(dx_map); dy_m = dy_map_to_m(dy_map)
             x_m = dx_m * ex + dy_m * ey
-            y_m = -dx_m * ey + dy_m * ey*0 + dy_m * (1.0)  # keep sign consistent; y crosswind
-            y_m = -dx_m * ey + dy_m * ex  # correct rotation
+            y_m = -dx_m * ey + dy_m * ex
             mask = (x_m > 1.0) & (x_m <= maxx)
             if not np.any(mask): continue
             sigy = np.ones_like(x_m); sigz = np.ones_like(x_m)
@@ -390,10 +422,10 @@ def _plume_concentration_grid(x_domain, y_domain):
             sigy[idx] = sy; sigz[idx] = sz
             pref = Q / (2.0 * math.pi * U)
             termy = np.exp(-(y_m ** 2) / (2.0 * sigy ** 2))
-            termz = np.exp(-(H ** 2) / (2.0 * sigz ** 2)) + np.exp(-(H ** 2) / (2.0 * sigz ** 2))
+            termz = np.exp(-((0.0 - H) ** 2) / (2.0 * sigz ** 2)) + np.exp(-((0.0 + H) ** 2) / (2.0 * sigz ** 2))
             denom = sigy * sigz
             contrib = np.zeros_like(C)
-            contrib[idx] = pref * termy[idx] / denom[idx]
+            contrib[idx] = pref * termy[idx] * termz[idx] / denom[idx]
             C += contrib
         return gx, gy, C
     except Exception as e:
@@ -467,7 +499,7 @@ def park_chart():
                 hoverinfo="skip", showlegend=False, name="agents"
             ))
 
-        # 4) hazard shapes + epicentres
+        # 4) hazard circles
         shapes = []
         hx_list, hy_list = [], []
         for h in HAZARDS:
@@ -481,6 +513,18 @@ def park_chart():
             ))
             hx_list.append(cx); hy_list.append(cy)
 
+        # 5) safe zone markers (green)
+        safe_x, safe_y = [], []
+        for nid in SAFE_NODES:
+            x, y = POS_DICT[nid]
+            safe_x.append(x); safe_y.append(y)
+        if safe_x:
+            fig.add_trace(go.Scatter(
+                x=safe_x, y=safe_y, mode="markers",
+                marker=dict(size=9, color="green", symbol="circle"),
+                name="safe_zones", hoverinfo="skip", showlegend=False
+            ))
+
         fig.update_layout(
             shapes=shapes,
             xaxis=dict(range=x_domain, showgrid=True, zeroline=False),
@@ -492,6 +536,7 @@ def park_chart():
             uirevision="stay"
         )
 
+        # hazard epicentres (red x)
         if hx_list:
             fig.add_trace(go.Scatter(
                 x=hx_list, y=hy_list, mode="markers",
@@ -533,6 +578,7 @@ def Controls():
 
     def on_clear_hazards():
         HAZARDS.clear()
+        _recompute_safe_nodes()
         _choose_targets_and_paths()
         tick.value += 1
 
@@ -549,6 +595,7 @@ def Controls():
             "r_m": float(max(5.0, hazard_radius.value)),
         })
         HAZARD_ID += 1
+        _recompute_safe_nodes()
         _choose_targets_and_paths()
         tick.value += 1
 
@@ -604,10 +651,11 @@ def Page():
     with sl.Column():
         sl.Markdown("## West Coast Park — Evacuation (Solara)")
         Controls()
-        sl.Markdown(f"**Hazards: {len(HAZARDS)}**")
+        sl.Markdown(f"**Hazards: {len(HAZARDS)}** | **Safe zones: {len(SAFE_NODES)}**")
         sl.Markdown(f"**{kpi_eta_summary()}**")
         sl.FigurePlotly(chart)
 
 # Solara entry point
 page = Page
 reset_model()
+_recompute_safe_nodes()
