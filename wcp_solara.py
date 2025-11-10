@@ -73,20 +73,30 @@ plume_H_m = sl.reactive(20.0)         # m
 plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
 plume_grid = sl.reactive(90)          # rows
-# QC / overlay toggles (module-level so park_chart can read them)
+
+# QC / overlay toggles
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
+
+# ---- NEW: risk map + safe-zone UI ----
+risk_show = sl.reactive(True)          # toggle ETA heatmap
+risk_grid = sl.reactive(90)            # rows; columns auto-scale
+risk_speed_mps = sl.reactive(1.4)      # assumed evac walking speed for ETA
 
 # storage for QC results
 qc_summary = sl.reactive("")
 qc_issues  = sl.reactive("")
 qc_rows_cache = []
+
 # Per-run state
 PEOPLE = []
 HAZARDS = []   # dicts: {"id": int, "pos": np.array([x,y]) in map units, "r_m": float}
 HAZARD_ID = 0
-SAFE_NODES = []    # list of node ids treated as "safe zones"
-N_SAFE = 12        # how many safe nodes to mark
+SAFE_NODES = []    # auto-picked safe zones
+N_SAFE = 12        # target count of safe nodes to mark
+MANUAL_SAFE = set()    # ---- NEW: user-placed safe nodes
+FEATURED_SAFE = set()  # ---- NEW: highlighted safest (farthest from hazards)
+
 rng = np.random.default_rng(42)
 
 # -------------------- HELPERS --------------------
@@ -179,11 +189,9 @@ def _recompute_safe_nodes():
         SAFE_NODES = []
         return
     if not HAZARDS:
-        # No hazards yet → choose extreme nodes around the perimeter by distance to center
         center = NODE_POS.mean(axis=0)
         scores = np.array([map_distance_m(pt, center) for pt in NODE_POS], dtype=float)
     else:
-        # Score = min distance to any hazard (meters) – bigger is safer
         scores = np.empty(NODE_POS.shape[0], dtype=float)
         for i, (x, y) in enumerate(NODE_POS):
             pt = np.array([x, y], dtype=float)
@@ -194,14 +202,31 @@ def _recompute_safe_nodes():
 
 def _nearest_safe_node_from(node_id):
     """Return safe node with smallest network distance from node_id."""
-    if not SAFE_NODES:
+    # include manual safe nodes
+    safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not safe_pool:
         return node_id
     best_target, best_len = None, float("inf")
-    for t in SAFE_NODES:
+    for t in safe_pool:
         L = _nx_path_length(node_id, t)
         if L < best_len:
             best_len, best_target = L, t
     return best_target if best_target is not None else node_id
+
+# ---- NEW: featured safe nodes (safest vs hazards) ----
+def _recompute_featured_safe():
+    global FEATURED_SAFE
+    pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not pool or not HAZARDS:
+        FEATURED_SAFE = set()
+        return
+    scored = []
+    for nid in pool:
+        x, y = POS_DICT[nid]
+        _, d = _nearest_hazard_m(np.array([x, y], float))
+        scored.append((nid, d))
+    scored.sort(key=lambda t: t[1], reverse=True)
+    FEATURED_SAFE = set([nid for nid, _ in scored[:max(1, min(4, len(scored)))]])
 
 # -------------------- AFFECTED-ENVELOPE TEST --------------------
 def _is_person_expected_affected(pt_xy, t):
@@ -233,13 +258,11 @@ def _spawn_people(n):
             "panic": 0.0, "panic_thr": panic_threshold,
             "aware": False, "aware_delay": float(base_awareness_lag.value + rng.uniform(-2, 2)),
             "reached": False, "target_node": None, "path": [], "path_idx": 0,
-            # store when they first become affected
             "affected_since": None,
         })
     PEOPLE.extend(new_people)
 
 def _retarget_to_nearest_safe(p):
-    """Pick nearest SAFE_NODE from the person's current nearest node and compute path."""
     s_idx, s_node = _nearest_node_idx(p["pos"][0], p["pos"][1])
     t_node = _nearest_safe_node_from(s_node)
     p["target_node"] = t_node
@@ -247,7 +270,6 @@ def _retarget_to_nearest_safe(p):
     p["path_idx"] = 0
 
 def _choose_targets_and_paths():
-    # Refresh global SAFE_NODES whenever hazards/people change
     _recompute_safe_nodes()
     for p in PEOPLE:
         _retarget_to_nearest_safe(p)
@@ -257,11 +279,11 @@ def reset_model():
     PEOPLE = []
     _spawn_people(int(num_people.value))
     _choose_targets_and_paths()
+    _recompute_featured_safe()   # ---- NEW
     tick.value += 1
 
 # -------------------- DYNAMICS --------------------
 def _update_panic(p):
-    # Panic only for evacuating people
     p["panic"] = min(1.0, p["panic"] + 0.02)
     if (not p["is_cyclist"]) and (p["panic"] > p["panic_thr"]):
         p["speed"] = p["base_speed"] * (1 + p["panic"] * 0.3)
@@ -278,8 +300,8 @@ def _advance_hazards():
     for h in HAZARDS:
         h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
         h["r_m"] = float(h["r_m"] + dr_m)
-    # hazard motion changes safety → recompute safe nodes
     _recompute_safe_nodes()
+    _recompute_featured_safe()  # ---- NEW
 
 def _step_once():
     _advance_hazards()
@@ -289,15 +311,12 @@ def _step_once():
         affected = _is_person_expected_affected(p["pos"], tnow)
 
         if not affected:
-            # unaffected: do not move
             p["aware"] = False
             p["dir"] = np.array([0.0, 0.0])
             continue
 
-        # affected: set affected_since once, honor awareness lag, then move
         if p["affected_since"] is None:
             p["affected_since"] = tnow
-            # when first affected, retarget to nearest SAFE_NODE
             _retarget_to_nearest_safe(p)
 
         if not p["aware"]:
@@ -439,6 +458,38 @@ def _plume_concentration_grid(x_domain, y_domain):
         last_error.value = f"Plume grid error: {repr(e)}"
         return None
 
+# -------------------- RISK (ETA) HEATMAP --------------------
+def _risk_eta_grid(x_domain, y_domain):
+    if not risk_show.value:
+        return None
+    ny = int(max(30, min(180, int(risk_grid.value))))
+    nx = int(max(40, min(200, int(ny * 1.2))))
+    gx = np.linspace(x_domain[0], x_domain[1], nx)
+    gy = np.linspace(y_domain[0], y_domain[1], ny)
+    X, Y = np.meshgrid(gx, gy)
+    pts = np.column_stack([X.ravel(), Y.ravel()])
+    _, idxs = KD.query(pts)
+    node_ids = [NODE_IDS[i] for i in idxs]
+    safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not safe_pool:
+        return gx, gy, np.full_like(X, np.nan, dtype=float)
+    speed = max(0.5, float(risk_speed_mps.value))
+    memo = {}
+    etas = np.empty(idxs.shape[0], dtype=float)
+    for i, nid in enumerate(node_ids):
+        if nid in memo:
+            etas[i] = memo[nid]; continue
+        tnode = _nearest_safe_node_from(nid)
+        if tnode == nid:
+            eta = 0.0
+        else:
+            dist = _nx_path_length(nid, tnode)     # weighted by length
+            eta = (dist / speed) if np.isfinite(dist) else np.nan
+        memo[nid] = eta
+        etas[i] = eta
+    Z = etas.reshape(X.shape)
+    return gx, gy, Z
+
 # -------------------- OSM GEOMETRY → PLOTLY SEGMENTS --------------------
 def _segments_from_edges_gdf():
     seg_x, seg_y = [], []
@@ -462,6 +513,34 @@ def _segments_from_edges_gdf():
         last_error.value = f"Edge geometry error: {repr(e)}"
         return [], []
 
+# -------------------- SAFE-ZONE SUGGESTION (HEURISTIC) --------------------
+def _suggest_optimized_safe(k=None):
+    """
+    Greedy farthest-point seeding using map-space spread among the safest pool,
+    then assign MANUAL_SAFE to the chosen set. Goal: reduce mean ETA.
+    """
+    global MANUAL_SAFE
+    k = int(k or max(4, min(12, N_SAFE)))
+    if not NODE_POS.size:
+        return
+    # score by distance from hazards (or from center if no hazards)
+    if HAZARDS:
+        scores = np.array([_nearest_hazard_m(NODE_POS[i])[1] for i in range(NODE_POS.shape[0])], float)
+    else:
+        center = NODE_POS.mean(axis=0)
+        scores = np.array([map_distance_m(NODE_POS[i], center) for i in range(NODE_POS.shape[0])], float)
+    order = np.argsort(-scores)
+    pool_idx = order[:max(5*k, k+50)]
+    chosen = [pool_idx[0]]
+    dmin = np.full(pool_idx.shape[0], np.inf)
+    for _ in range(1, k):
+        last_pt = NODE_POS[chosen[-1]]
+        dmin = np.minimum(dmin, np.linalg.norm(NODE_POS[pool_idx] - last_pt, axis=1))
+        nxt = pool_idx[int(np.argmax(dmin))]
+        chosen.append(int(nxt))
+    MANUAL_SAFE = set([NODE_IDS[i] for i in chosen])
+    _recompute_featured_safe()
+
 # -------------------- CHART --------------------
 def park_chart():
     last_error.value = ""
@@ -478,7 +557,7 @@ def park_chart():
 
         fig = go.Figure()
 
-        # 1) plume heatmap
+        # 1) plume heatmap (coloraxis #1)
         plume_out = _plume_concentration_grid(x_domain, y_domain)
         if plume_out is not None:
             gx, gy, conc = plume_out
@@ -489,6 +568,18 @@ def park_chart():
                     name="Concentration (g/m^3)"
                 ))
                 fig.update_layout(coloraxis=dict(colorscale="YlOrRd"))
+
+        # 1b) RISK (ETA) heatmap (coloraxis #2)
+        risk_out = _risk_eta_grid(x_domain, y_domain)
+        if risk_out is not None:
+            rx, ry, rZ = risk_out
+            if rZ is not None and np.isfinite(rZ).any():
+                fig.add_trace(go.Heatmap(
+                    x=rx.tolist(), y=ry.tolist(), z=rZ,
+                    zsmooth="best", coloraxis="coloraxis2", opacity=0.45, showscale=True,
+                    name="ETA to safety (s)"
+                ))
+                fig.update_layout(coloraxis2=dict(colorscale="Blues"))
 
         # 2) park edges
         if seg_x and seg_y:
@@ -520,17 +611,28 @@ def park_chart():
             ))
             hx_list.append(cx); hy_list.append(cy)
 
-        # 5) safe zone markers (green)
-        safe_x, safe_y = [], []
-        for nid in SAFE_NODES:
-            x, y = POS_DICT[nid]
-            safe_x.append(x); safe_y.append(y)
-        if safe_x:
-            fig.add_trace(go.Scatter(
-                x=safe_x, y=safe_y, mode="markers",
-                marker=dict(size=9, color="green", symbol="circle"),
-                name="safe_zones", hoverinfo="skip", showlegend=False
-            ))
+        # 5) safe zones (dark green = pool, light green open circle = featured)
+        safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+        if safe_pool:
+            sx_bg, sy_bg, sx_fg, sy_fg = [], [], [], []
+            for nid in safe_pool:
+                x, y = POS_DICT[nid]
+                if nid in FEATURED_SAFE:
+                    sx_fg.append(x); sy_fg.append(y)
+                else:
+                    sx_bg.append(x); sy_bg.append(y)
+            if sx_bg:
+                fig.add_trace(go.Scatter(
+                    x=sx_bg, y=sy_bg, mode="markers",
+                    marker=dict(size=10, color="rgb(0,90,0)", symbol="circle"),
+                    name="safe_bg", hoverinfo="skip", showlegend=False
+                ))
+            if sx_fg:
+                fig.add_trace(go.Scatter(
+                    x=sx_fg, y=sy_fg, mode="markers",
+                    marker=dict(size=12, color="rgb(0,180,0)", symbol="circle-open"),
+                    name="safe_featured", hoverinfo="skip", showlegend=False
+                ))
 
         fig.update_layout(
             shapes=shapes,
@@ -543,21 +645,16 @@ def park_chart():
             uirevision="stay"
         )
 
-        # hazard epicentres (red x)
         if hx_list:
             fig.add_trace(go.Scatter(
                 x=hx_list, y=hy_list, mode="markers",
                 marker=dict(symbol="x", size=11, line=dict(width=2), color="red"),
                 hoverinfo="skip", showlegend=False, name="hazard_centers"
             ))
-                # Optional: per-agent planned routes (thin green), evacuees only
+
+        # optional evac-path overlays
         try:
-            # read the same reactive flag we created in Controls
-            show_paths = False
-            try:
-                show_paths = qc_show_paths.value  # may not exist before Controls renders
-            except Exception:
-                show_paths = False
+            show_paths = qc_show_paths.value
             if show_paths:
                 px, py = _collect_paths_polylines(evac_only=True, max_agents=1000)
                 if px and py:
@@ -569,8 +666,6 @@ def park_chart():
         except Exception:
             pass
 
-
-
         return fig
 
     except Exception as e:
@@ -581,10 +676,9 @@ def park_chart():
             paper_bgcolor="white", plot_bgcolor="white",
             title="Chart failed to render — see 'Render error' text above.",
         ))
-    
+
 # -------------------- QUALITY CHECK HELPERS --------------------
 def _min_hazard_distance_at_xy(xy):
-    """Min distance in meters from map point xy to any hazard centre."""
     if not HAZARDS:
         return float("inf")
     _, d_m = _nearest_hazard_m(np.array([xy[0], xy[1]], dtype=float))
@@ -595,7 +689,6 @@ def _node_xy(nid):
     return np.array([x, y], dtype=float)
 
 def _path_length_m_along_nodes(path_nodes):
-    """Sum map_distance_m along a node list."""
     if not path_nodes or len(path_nodes) < 2:
         return 0.0
     d = 0.0
@@ -604,15 +697,13 @@ def _path_length_m_along_nodes(path_nodes):
     return d
 
 def _evacuee_current_path_nodes(p):
-    """Return list of node ids from the person's current index to the end."""
     path = p.get("path", [])
     k = int(p.get("path_idx", 0))
     if not path or k >= len(path) - 1:
-        return path[-1:]  # empty or already at end
+        return path[-1:]
     return path[k:]
 
 def _collect_paths_polylines(evac_only=True, max_agents=300):
-    """Return plotly-ready polylines (x list, y list) for agents' current planned routes."""
     xs, ys = [], []
     drawn = 0
     tnow = float(tick.value)
@@ -632,41 +723,27 @@ def _collect_paths_polylines(evac_only=True, max_agents=300):
     return xs, ys
 
 def qc_run(expected_margin_m=25.0):
-    """
-    Returns (summary_lines, issues_lines, per_agent_rows)
-    - summary_lines: list[str] for quick KPIs
-    - issues_lines:  list[str] red-flag items
-    - per_agent_rows: list[dict] for CSV (one row per agent)
-    """
     summaries = []
     issues = []
     rows = []
 
-    # A. Safe zone basic checks
-    if not SAFE_NODES:
-        issues.append("No safe zones computed yet.")
+    # A. Safe zone checks
+    safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not safe_pool:
+        issues.append("No safe zones computed or placed yet.")
     else:
-        # min distance of each safe node to nearest hazard
         safe_dists = []
-        for nid in SAFE_NODES:
+        for nid in safe_pool:
             xy = _node_xy(nid)
             dmin = _min_hazard_distance_at_xy(xy)
             safe_dists.append(dmin)
         if safe_dists:
-            summaries.append(f"Safe zones: {len(SAFE_NODES)} | min dist to hazard: {min(safe_dists):.1f} m | median: {np.median(safe_dists):.1f} m")
-            # Flag safe nodes too close to expected envelope “edge”
-            tnow = float(tick.value)
-            # approximate current largest expected radius at the nearest hazard
-            suspicious = 0
-            for nid, dmin in zip(SAFE_NODES, safe_dists):
-                # if any hazard exists inside margin from this safe node, flag
-                if dmin < expected_margin_m:
-                    suspicious += 1
+            summaries.append(f"Safe zones: {len(safe_pool)} | min dist to hazard: {min(safe_dists):.1f} m | median: {np.median(safe_dists):.1f} m")
+            suspicious = sum(1 for dmin in safe_dists if dmin < expected_margin_m)
             if suspicious > 0:
-                issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre. Consider recomputation or larger N_SAFE.")
+                issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre.")
 
-    # B. Graph reachability checks (component / path existence)
-    # For performance, we sample evacuees only
+    # B. Graph reachability
     tnow = float(tick.value)
     evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
     summaries.append(f"Evacuees detected now: {len(evacuees)} / {len(PEOPLE)} total")
@@ -683,7 +760,6 @@ def qc_run(expected_margin_m=25.0):
         total_len_m.append(plen)
         dst = nodes[-1]
         load_per_safe[dst] = load_per_safe.get(dst, 0) + 1
-
         rows.append({
             "x": float(p["pos"][0]),
             "y": float(p["pos"][1]),
@@ -699,14 +775,10 @@ def qc_run(expected_margin_m=25.0):
     if total_len_m:
         summaries.append(f"Path length (m) — avg: {np.mean(total_len_m):.1f} | P90: {np.percentile(total_len_m,90):.1f} | max: {np.max(total_len_m):.1f}")
     if load_per_safe:
-        # show top 5 loaded safe nodes
         top = sorted(load_per_safe.items(), key=lambda kv: kv[1], reverse=True)[:5]
         summaries.append("Top safe-node loads: " + ", ".join([f"{nid}:{cnt}" for nid,cnt in top]))
 
-    # C. Optional: check edge geometry presence (visual context)
-    # (park_chart already logs this if missing)
-
-    # D. Unaffected correctness: ensure they have 0 speed and don't move
+    # D. Non-affected shouldn't move
     still_but_marked = 0
     for p in PEOPLE:
         if not _is_person_expected_affected(p["pos"], tnow) and (np.linalg.norm(p.get("dir", np.zeros(2))) > 1e-6):
@@ -729,7 +801,6 @@ def qc_run(expected_margin_m=25.0):
 
     return summaries, issues, rows
 
-
 # -------------------- UI --------------------
 @sl.component
 def Controls():
@@ -746,6 +817,7 @@ def Controls():
             asyncio.get_event_loop().create_task(loop_runner())
         else:
             running.value = False
+
     # --- QC panel ---
     sl.Markdown("### Quality Check")
 
@@ -781,7 +853,7 @@ def Controls():
         sl.Markdown("**QC Issues**")
         sl.Markdown(qc_issues.value)
 
-
+    # --- Hazard controls ---
     def on_reset():
         running.value = False
         reset_model()
@@ -789,6 +861,7 @@ def Controls():
     def on_clear_hazards():
         HAZARDS.clear()
         _recompute_safe_nodes()
+        _recompute_featured_safe()
         _choose_targets_and_paths()
         tick.value += 1
 
@@ -806,6 +879,39 @@ def Controls():
         })
         HAZARD_ID += 1
         _recompute_safe_nodes()
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+        tick.value += 1
+
+    # --- NEW: Manual Safe Zones + Optimize ---
+    safe_phrase = sl.reactive("")
+    def _add_manual_safe_by_phrase(phrase: str):
+        pt = _point_from_phrase(phrase)
+        if pt is None: return False
+        _, node_id = _nearest_node_idx(pt[0], pt[1])
+        MANUAL_SAFE.add(node_id)
+        return True
+
+    def on_add_safe():
+        txt = (safe_phrase.value or "").strip()
+        if not txt:
+            sl.notify("Enter a phrase like 'North West', 'Center', 'SE'.", timeout=3000); return
+        ok = _add_manual_safe_by_phrase(txt)
+        if not ok:
+            sl.notify("Could not parse phrase; try: North, South, East, West, NE, NW, SE, SW, Center.", timeout=4000); return
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+        tick.value += 1
+
+    def on_clear_safe():
+        MANUAL_SAFE.clear()
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+        tick.value += 1
+
+    def on_optimize():
+        _suggest_optimized_safe(k=N_SAFE)
+        _recompute_featured_safe()
         _choose_targets_and_paths()
         tick.value += 1
 
@@ -851,6 +957,21 @@ def Controls():
             sl.SliderFloat("Plume range (m)", min=200.0, max=3000.0, value=plume_range_m)
             sl.InputInt("Heatmap resolution", value=plume_grid)
 
+        # ---- NEW: Risk heatmap controls ----
+        sl.Markdown("**Risk (ETA) heatmap**")
+        with sl.Row():
+            sl.Checkbox(label="Show risk (ETA) heatmap", value=risk_show)
+            sl.InputInt("Risk grid rows", value=risk_grid)
+            sl.SliderFloat("Risk walking speed (m/s)", min=0.5, max=3.0, value=risk_speed_mps)
+
+        # ---- NEW: Manual / optimized safe zones ----
+        sl.Markdown("**Safe Zones — manual & optimize**")
+        with sl.Row():
+            sl.InputText(label="Add Safe Zone (phrase)", value=safe_phrase, continuous_update=False, placeholder="North East")
+            sl.Button("Add Safe Zone Here", on_click=on_add_safe)
+            sl.Button("Clear Safe Zones", on_click=on_clear_safe)
+            sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize)
+
         if last_error.value:
             sl.Markdown(f"**Render error:** {last_error.value}")
 
@@ -861,7 +982,7 @@ def Page():
     with sl.Column():
         sl.Markdown("## West Coast Park — Evacuation (Solara)")
         Controls()
-        sl.Markdown(f"**Hazards: {len(HAZARDS)}** | **Safe zones: {len(SAFE_NODES)}**")
+        sl.Markdown(f"**Hazards: {len(HAZARDS)}** | **Safe zones (auto+manual): {len(set(SAFE_NODES)|set(MANUAL_SAFE))}**")
         sl.Markdown(f"**{kpi_eta_summary()}**")
         sl.FigurePlotly(chart)
 
@@ -869,3 +990,4 @@ def Page():
 page = Page
 reset_model()
 _recompute_safe_nodes()
+_recompute_featured_safe()
