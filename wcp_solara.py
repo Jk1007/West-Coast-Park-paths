@@ -73,7 +73,14 @@ plume_H_m = sl.reactive(20.0)         # m
 plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
 plume_grid = sl.reactive(90)          # rows
+# QC / overlay toggles (module-level so park_chart can read them)
+qc_show_paths = sl.reactive(False)
+qc_km_margin = sl.reactive(25.0)
 
+# storage for QC results
+qc_summary = sl.reactive("")
+qc_issues  = sl.reactive("")
+qc_rows_cache = []
 # Per-run state
 PEOPLE = []
 HAZARDS = []   # dicts: {"id": int, "pos": np.array([x,y]) in map units, "r_m": float}
@@ -543,6 +550,26 @@ def park_chart():
                 marker=dict(symbol="x", size=11, line=dict(width=2), color="red"),
                 hoverinfo="skip", showlegend=False, name="hazard_centers"
             ))
+                # Optional: per-agent planned routes (thin green), evacuees only
+        try:
+            # read the same reactive flag we created in Controls
+            show_paths = False
+            try:
+                show_paths = qc_show_paths.value  # may not exist before Controls renders
+            except Exception:
+                show_paths = False
+            if show_paths:
+                px, py = _collect_paths_polylines(evac_only=True, max_agents=1000)
+                if px and py:
+                    fig.add_trace(go.Scatter(
+                        x=px, y=py, mode="lines",
+                        line=dict(width=1, color="green"),
+                        hoverinfo="skip", showlegend=False, name="evac_paths"
+                    ))
+        except Exception:
+            pass
+
+
 
         return fig
 
@@ -554,6 +581,154 @@ def park_chart():
             paper_bgcolor="white", plot_bgcolor="white",
             title="Chart failed to render — see 'Render error' text above.",
         ))
+    
+# -------------------- QUALITY CHECK HELPERS --------------------
+def _min_hazard_distance_at_xy(xy):
+    """Min distance in meters from map point xy to any hazard centre."""
+    if not HAZARDS:
+        return float("inf")
+    _, d_m = _nearest_hazard_m(np.array([xy[0], xy[1]], dtype=float))
+    return float(d_m)
+
+def _node_xy(nid):
+    x, y = POS_DICT[nid]
+    return np.array([x, y], dtype=float)
+
+def _path_length_m_along_nodes(path_nodes):
+    """Sum map_distance_m along a node list."""
+    if not path_nodes or len(path_nodes) < 2:
+        return 0.0
+    d = 0.0
+    for a, b in zip(path_nodes[:-1], path_nodes[1:]):
+        d += map_distance_m(_node_xy(a), _node_xy(b))
+    return d
+
+def _evacuee_current_path_nodes(p):
+    """Return list of node ids from the person's current index to the end."""
+    path = p.get("path", [])
+    k = int(p.get("path_idx", 0))
+    if not path or k >= len(path) - 1:
+        return path[-1:]  # empty or already at end
+    return path[k:]
+
+def _collect_paths_polylines(evac_only=True, max_agents=300):
+    """Return plotly-ready polylines (x list, y list) for agents' current planned routes."""
+    xs, ys = [], []
+    drawn = 0
+    tnow = float(tick.value)
+    for p in PEOPLE:
+        affected = _is_person_expected_affected(p["pos"], tnow)
+        if evac_only and not affected:
+            continue
+        nodes = _evacuee_current_path_nodes(p)
+        if len(nodes) < 2:
+            continue
+        for a, b in zip(nodes[:-1], nodes[1:]):
+            xa, ya = POS_DICT[a]; xb, yb = POS_DICT[b]
+            xs += [xa, xb, None]; ys += [ya, yb, None]
+        drawn += 1
+        if drawn >= max_agents:
+            break
+    return xs, ys
+
+def qc_run(expected_margin_m=25.0):
+    """
+    Returns (summary_lines, issues_lines, per_agent_rows)
+    - summary_lines: list[str] for quick KPIs
+    - issues_lines:  list[str] red-flag items
+    - per_agent_rows: list[dict] for CSV (one row per agent)
+    """
+    summaries = []
+    issues = []
+    rows = []
+
+    # A. Safe zone basic checks
+    if not SAFE_NODES:
+        issues.append("No safe zones computed yet.")
+    else:
+        # min distance of each safe node to nearest hazard
+        safe_dists = []
+        for nid in SAFE_NODES:
+            xy = _node_xy(nid)
+            dmin = _min_hazard_distance_at_xy(xy)
+            safe_dists.append(dmin)
+        if safe_dists:
+            summaries.append(f"Safe zones: {len(SAFE_NODES)} | min dist to hazard: {min(safe_dists):.1f} m | median: {np.median(safe_dists):.1f} m")
+            # Flag safe nodes too close to expected envelope “edge”
+            tnow = float(tick.value)
+            # approximate current largest expected radius at the nearest hazard
+            suspicious = 0
+            for nid, dmin in zip(SAFE_NODES, safe_dists):
+                # if any hazard exists inside margin from this safe node, flag
+                if dmin < expected_margin_m:
+                    suspicious += 1
+            if suspicious > 0:
+                issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre. Consider recomputation or larger N_SAFE.")
+
+    # B. Graph reachability checks (component / path existence)
+    # For performance, we sample evacuees only
+    tnow = float(tick.value)
+    evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
+    summaries.append(f"Evacuees detected now: {len(evacuees)} / {len(PEOPLE)} total")
+
+    no_path = 0
+    total_len_m = []
+    load_per_safe = {}
+    for p in evacuees:
+        nodes = _evacuee_current_path_nodes(p)
+        if len(nodes) < 2:
+            no_path += 1
+            continue
+        plen = _path_length_m_along_nodes(nodes)
+        total_len_m.append(plen)
+        dst = nodes[-1]
+        load_per_safe[dst] = load_per_safe.get(dst, 0) + 1
+
+        rows.append({
+            "x": float(p["pos"][0]),
+            "y": float(p["pos"][1]),
+            "affected": True,
+            "aware": bool(p.get("aware", False)),
+            "path_nodes": len(nodes),
+            "path_len_m": float(plen),
+            "dest_safe_node": str(dst),
+        })
+
+    if no_path > 0:
+        issues.append(f"{no_path} evacuee(s) currently have no valid path to a safe zone.")
+    if total_len_m:
+        summaries.append(f"Path length (m) — avg: {np.mean(total_len_m):.1f} | P90: {np.percentile(total_len_m,90):.1f} | max: {np.max(total_len_m):.1f}")
+    if load_per_safe:
+        # show top 5 loaded safe nodes
+        top = sorted(load_per_safe.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        summaries.append("Top safe-node loads: " + ", ".join([f"{nid}:{cnt}" for nid,cnt in top]))
+
+    # C. Optional: check edge geometry presence (visual context)
+    # (park_chart already logs this if missing)
+
+    # D. Unaffected correctness: ensure they have 0 speed and don't move
+    still_but_marked = 0
+    for p in PEOPLE:
+        if not _is_person_expected_affected(p["pos"], tnow) and (np.linalg.norm(p.get("dir", np.zeros(2))) > 1e-6):
+            still_but_marked += 1
+        if not _is_person_expected_affected(p["pos"], tnow):
+            rows.append({
+                "x": float(p["pos"][0]),
+                "y": float(p["pos"][1]),
+                "affected": False,
+                "aware": bool(p.get("aware", False)),
+                "path_nodes": 0,
+                "path_len_m": 0.0,
+                "dest_safe_node": "",
+            })
+    if still_but_marked > 0:
+        issues.append(f"{still_but_marked} non-affected person(s) appear to be moving (dir≠0).")
+
+    if not issues:
+        issues.append("No issues detected.")
+
+    return summaries, issues, rows
+
 
 # -------------------- UI --------------------
 @sl.component
@@ -571,6 +746,41 @@ def Controls():
             asyncio.get_event_loop().create_task(loop_runner())
         else:
             running.value = False
+    # --- QC panel ---
+    sl.Markdown("### Quality Check")
+
+    def on_qc_run():
+        summaries, problems, rows = qc_run(expected_margin_m=float(qc_km_margin.value))
+        qc_summary.value = "\n".join([f"- {s}" for s in summaries])
+        qc_issues.value  = "\n".join([f"- {p}" for p in problems])
+        qc_rows_cache.clear()
+        qc_rows_cache.extend(rows)
+        tick.value += 1
+
+    def on_export_csv():
+        if not qc_rows_cache:
+            sl.notify("Run QC first; nothing to export.", timeout=3000); 
+            return
+        df = pd.DataFrame(qc_rows_cache)
+        path = "/mnt/data/qc_routes.csv"
+        df.to_csv(path, index=False)
+        sl.Markdown(f"[Download QC CSV](sandbox:{path})")
+
+    with sl.Row():
+        sl.SliderFloat("Flag safe-zone if within X m of a hazard", min=0.0, max=200.0, value=qc_km_margin)
+        sl.Checkbox(label="Show evac paths overlay", value=qc_show_paths)
+
+    with sl.Row():
+        sl.Button("Run QC", on_click=on_qc_run)
+        sl.Button("Export QC CSV", on_click=on_export_csv)
+
+    if qc_summary.value:
+        sl.Markdown("**QC Summary**")
+        sl.Markdown(qc_summary.value)
+    if qc_issues.value:
+        sl.Markdown("**QC Issues**")
+        sl.Markdown(qc_issues.value)
+
 
     def on_reset():
         running.value = False
