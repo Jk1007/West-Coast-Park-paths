@@ -1,4 +1,4 @@
-# wcp_solara.py — West Coast Park evac (typed location → hazards) + nearest safe zones
+# wcp_solara.py — West Coast Park evac (typed location → hazards) + nearest & manual safe zones + risk & density maps
 # Run:  python -m solara run wcp_solara.py
 import plotly.graph_objects as go
 import asyncio
@@ -78,10 +78,16 @@ plume_grid = sl.reactive(90)          # rows
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
 
-# ---- NEW: risk map + safe-zone UI ----
-risk_show = sl.reactive(True)          # toggle ETA heatmap
-risk_grid = sl.reactive(90)            # rows; columns auto-scale
+# ---- RISK (time-to-safe) heatmap ----
+risk_show = sl.reactive(True)
+risk_grid = sl.reactive(90)            # rows
 risk_speed_mps = sl.reactive(1.4)      # assumed evac walking speed for ETA
+
+# ---- PEOPLE DENSITY map/contours (NEW) ----
+density_show = sl.reactive(True)       # toggle people-density layer
+density_grid = sl.reactive(90)         # rows
+density_bandwidth_m = sl.reactive(18.0)  # Gaussian KDE bandwidth (meters)
+density_as_contour = sl.reactive(True)   # contour vs heatmap
 
 # storage for QC results
 qc_summary = sl.reactive("")
@@ -94,8 +100,8 @@ HAZARDS = []   # dicts: {"id": int, "pos": np.array([x,y]) in map units, "r_m": 
 HAZARD_ID = 0
 SAFE_NODES = []    # auto-picked safe zones
 N_SAFE = 12        # target count of safe nodes to mark
-MANUAL_SAFE = set()    # ---- NEW: user-placed safe nodes
-FEATURED_SAFE = set()  # ---- NEW: highlighted safest (farthest from hazards)
+MANUAL_SAFE = set()    # user-placed safe nodes
+FEATURED_SAFE = set()  # highlighted safest (farthest from hazards)
 
 rng = np.random.default_rng(42)
 
@@ -124,7 +130,7 @@ def _nearest_hazard_m(pt):
 
 def _hazard_radius_at(h): return float(h.get("r_m", 0.0))
 
-# ---- Pasquill–Gifford sigmas (quick rural approximations) ----
+# ---- Pasquill–Gifford sigmas ----
 def _sigmas_yz(x_m, cls):
     x = max(1.0, float(x_m)); c = cls.upper()
     if c == "A":  sig_y = 0.22 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.20 * x
@@ -202,7 +208,6 @@ def _recompute_safe_nodes():
 
 def _nearest_safe_node_from(node_id):
     """Return safe node with smallest network distance from node_id."""
-    # include manual safe nodes
     safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
     if not safe_pool:
         return node_id
@@ -213,8 +218,8 @@ def _nearest_safe_node_from(node_id):
             best_len, best_target = L, t
     return best_target if best_target is not None else node_id
 
-# ---- NEW: featured safe nodes (safest vs hazards) ----
 def _recompute_featured_safe():
+    """Pick a few safest (farthest from hazards) from pool to highlight."""
     global FEATURED_SAFE
     pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
     if not pool or not HAZARDS:
@@ -279,7 +284,7 @@ def reset_model():
     PEOPLE = []
     _spawn_people(int(num_people.value))
     _choose_targets_and_paths()
-    _recompute_featured_safe()   # ---- NEW
+    _recompute_featured_safe()
     tick.value += 1
 
 # -------------------- DYNAMICS --------------------
@@ -301,7 +306,7 @@ def _advance_hazards():
         h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
         h["r_m"] = float(h["r_m"] + dr_m)
     _recompute_safe_nodes()
-    _recompute_featured_safe()  # ---- NEW
+    _recompute_featured_safe()
 
 def _step_once():
     _advance_hazards()
@@ -404,7 +409,7 @@ def agents_df():
 def kpi_eta_summary():
     etas = []
     for p in PEOPLE:
-        if p["reached"] or not p.get("aware", False):  # only evacuating folks
+        if p["reached"] or not p.get("aware", False):
             continue
         remaining = _path_remaining_meters(p)
         spd = max(p["speed"], 0.1)
@@ -483,11 +488,49 @@ def _risk_eta_grid(x_domain, y_domain):
         if tnode == nid:
             eta = 0.0
         else:
-            dist = _nx_path_length(nid, tnode)     # weighted by length
+            dist = _nx_path_length(nid, tnode)     # weighted by length (meters)
             eta = (dist / speed) if np.isfinite(dist) else np.nan
         memo[nid] = eta
         etas[i] = eta
     Z = etas.reshape(X.shape)
+    return gx, gy, Z
+
+# -------------------- PEOPLE DENSITY (KDE) --------------------
+def _people_density_grid(x_domain, y_domain):
+    if not density_show.value:
+        return None
+    # grid
+    ny = int(max(30, min(200, int(density_grid.value))))
+    nx = int(max(40, min(240, int(ny * 1.2))))
+    gx = np.linspace(x_domain[0], x_domain[1], nx)
+    gy = np.linspace(y_domain[0], y_domain[1], ny)
+    X, Y = np.meshgrid(gx, gy)
+
+    if not PEOPLE:
+        return gx, gy, np.zeros_like(X, dtype=float)
+
+    # Gaussian kernel per agent; convert bandwidth from meters to map units
+    bw_m = max(5.0, float(density_bandwidth_m.value))
+    bw_x = max(meters_to_dx(bw_m), 1e-6)
+    bw_y = max(meters_to_dy(bw_m), 1e-6)
+    inv2sx2 = 1.0 / (2.0 * bw_x * bw_x)
+    inv2sy2 = 1.0 / (2.0 * bw_y * bw_y)
+
+    Z = np.zeros_like(X, dtype=float)
+    # light vectorization: sum of separable Gaussians over agents
+    px = np.array([p["pos"][0] for p in PEOPLE], dtype=float)
+    py = np.array([p["pos"][1] for p in PEOPLE], dtype=float)
+
+    # compute contributions
+    for i in range(px.shape[0]):
+        dx2 = (X - px[i]) ** 2
+        dy2 = (Y - py[i]) ** 2
+        Z += np.exp(-(dx2 * inv2sx2 + dy2 * inv2sy2))
+
+    # scale to [0,1] for stable color mapping
+    zmax = float(np.max(Z)) if np.isfinite(Z).any() else 0.0
+    if zmax > 0:
+        Z = Z / zmax
     return gx, gy, Z
 
 # -------------------- OSM GEOMETRY → PLOTLY SEGMENTS --------------------
@@ -580,6 +623,26 @@ def park_chart():
                     name="ETA to safety (s)"
                 ))
                 fig.update_layout(coloraxis2=dict(colorscale="Blues"))
+
+        # 1c) PEOPLE DENSITY (coloraxis #3) — heatmap OR contour
+        dens_out = _people_density_grid(x_domain, y_domain)
+        if dens_out is not None:
+            dx, dy, dZ = dens_out
+            if dZ is not None and np.isfinite(dZ).any():
+                if bool(density_as_contour.value):
+                    fig.add_trace(go.Contour(
+                        x=dx.tolist(), y=dy.tolist(), z=dZ,
+                        contours=dict(showlines=False),
+                        coloraxis="coloraxis3", opacity=0.55, showscale=True,
+                        name="Crowd density (norm.)"
+                    ))
+                else:
+                    fig.add_trace(go.Heatmap(
+                        x=dx.tolist(), y=dy.tolist(), z=dZ,
+                        zsmooth="best", coloraxis="coloraxis3", opacity=0.40, showscale=True,
+                        name="Crowd density (norm.)"
+                    ))
+                fig.update_layout(coloraxis3=dict(colorscale="Greens"))
 
         # 2) park edges
         if seg_x and seg_y:
@@ -883,7 +946,7 @@ def Controls():
         _choose_targets_and_paths()
         tick.value += 1
 
-    # --- NEW: Manual Safe Zones + Optimize ---
+    # --- Manual Safe Zones + Optimize ---
     safe_phrase = sl.reactive("")
     def _add_manual_safe_by_phrase(phrase: str):
         pt = _point_from_phrase(phrase)
@@ -957,14 +1020,23 @@ def Controls():
             sl.SliderFloat("Plume range (m)", min=200.0, max=3000.0, value=plume_range_m)
             sl.InputInt("Heatmap resolution", value=plume_grid)
 
-        # ---- NEW: Risk heatmap controls ----
+        # ---- Risk heatmap controls ----
         sl.Markdown("**Risk (ETA) heatmap**")
         with sl.Row():
             sl.Checkbox(label="Show risk (ETA) heatmap", value=risk_show)
             sl.InputInt("Risk grid rows", value=risk_grid)
             sl.SliderFloat("Risk walking speed (m/s)", min=0.5, max=3.0, value=risk_speed_mps)
 
-        # ---- NEW: Manual / optimized safe zones ----
+        # ---- People density controls ----
+        sl.Markdown("**People density (KDE) layer**")
+        with sl.Row():
+            sl.Checkbox(label="Show people density", value=density_show)
+            sl.Checkbox(label="Use contours (else heatmap)", value=density_as_contour)
+        with sl.Row():
+            sl.InputInt("Density grid rows", value=density_grid)
+            sl.SliderFloat("Density bandwidth (m)", min=5.0, max=60.0, value=density_bandwidth_m)
+
+        # ---- Manual / optimized safe zones ----
         sl.Markdown("**Safe Zones — manual & optimize**")
         with sl.Row():
             sl.InputText(label="Add Safe Zone (phrase)", value=safe_phrase, continuous_update=False, placeholder="North East")
