@@ -18,10 +18,8 @@ import re
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
 
-# directed MultiDiGraph from osmnx
 G = ox.load_graphml(GRAPH_FILE)
 
-# undirected simple Graph for shortest paths (by length)
 UG = nx.Graph()
 for u, v, d in G.to_undirected(as_view=False).edges(data=True):
     w = float(d.get("length", 1.0))
@@ -31,23 +29,19 @@ for u, v, d in G.to_undirected(as_view=False).edges(data=True):
     else:
         UG.add_edge(u, v, weight=w)
 
-# nodes / edges GeoDataFrames
 nodes_gdf = ox.graph_to_gdfs(G, nodes=True, edges=False)[["x", "y"]]
 EDGES_GDF = ox.graph_to_gdfs(G, nodes=False, edges=True)[["geometry"]]
 
-# useful arrays and KDTree
 NODE_POS = nodes_gdf[["x", "y"]].to_numpy()
 NODE_IDS = nodes_gdf.index.to_list()
 POS_DICT = {nid: (float(nodes_gdf.loc[nid, "x"]), float(nodes_gdf.loc[nid, "y"])) for nid in NODE_IDS}
 KD = KDTree(NODE_POS)
 
-# geometry info for map scaling
 X_MIN, Y_MIN = NODE_POS.min(axis=0)
 X_MAX, Y_MAX = NODE_POS.max(axis=0)
 IS_GEOGRAPHIC = (abs(X_MAX - X_MIN) < 10.0) and (abs(Y_MAX - Y_MIN) < 10.0)
 AVG_LAT_RAD = math.radians(float((Y_MIN + Y_MAX) / 2.0))
 
-# coordinate conversions
 def meters_to_dx(m): return float(m) / (111_320.0 * math.cos(AVG_LAT_RAD)) if IS_GEOGRAPHIC else float(m)
 def meters_to_dy(m): return float(m) / 110_540.0 if IS_GEOGRAPHIC else float(m)
 def dx_map_to_m(dx): return float(dx) * 111_320.0 * math.cos(AVG_LAT_RAD) if IS_GEOGRAPHIC else float(dx)
@@ -70,23 +64,17 @@ download_link_md = sl.reactive("")
 num_people = sl.reactive(200)
 pct_cyclists = sl.reactive(15)
 
-# Physical hazard growth (actual circle that advances each step)
 hazard_radius = sl.reactive(40.0)     # m (initial radius of a new hazard)
 hazard_spread = sl.reactive(1.2)      # m/step (actual circle growth)
 
-# Expected impact envelope (who should be evacuated)
-expected_growth_m = sl.reactive(3.0)  # m/step (envelope growth)
-expected_buffer_m = sl.reactive(0.0)  # m (static buffer on envelope)
+expected_growth_m = sl.reactive(3.0)  # m/step
+expected_buffer_m = sl.reactive(0.0)  # m
 
-# Wind / awareness
 wind_deg = sl.reactive(45.0)          # 0=E, 90=N
 wind_speed = sl.reactive(1.0)         # m/s
 base_awareness_lag = sl.reactive(8.0)
 
-# Location-input controls (replaces clicking)
-location_text = sl.reactive("")
-
-# Gaussian plume controls
+# plume/risk
 plume_show = sl.reactive(True)
 plume_Q_gs = sl.reactive(100.0)       # g/s
 plume_H_m = sl.reactive(20.0)         # m
@@ -94,41 +82,37 @@ plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
 plume_grid = sl.reactive(90)          # rows
 
-# QC / overlay toggles
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
 
-# Risk (ETA) heatmap
 risk_show = sl.reactive(True)
 risk_grid = sl.reactive(90)
 risk_speed_mps = sl.reactive(1.4)
 
-# storage for QC results
 qc_summary = sl.reactive("")
 qc_issues  = sl.reactive("")
 qc_rows_cache = []
 
 # ---- Live time/date/weather (auto-updating) ----
-time_str = sl.reactive("")              # e.g., "18:32:07"
-date_str = sl.reactive("")              # e.g., "Tuesday, 11 November 2025"
-weather_str = sl.reactive("Weather: —") # e.g., "29.6°C, RH 75%, Wind 2.3 m/s"
+time_str = sl.reactive("")
+date_str = sl.reactive("")
+weather_str = sl.reactive("Weather: —")
 _last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
 
 # Per-run state
 PEOPLE = []
-HAZARDS = []   # dicts: {"id": int, "pos": np.array([x,y]) in map units, "r_m": float}
+HAZARDS = []   # {"id": int, "pos": np.array([x,y]), "r_m": float}
 HAZARD_ID = 0
-SAFE_NODES = []    # auto-picked safe zones
-N_SAFE = 12        # target count of safe nodes to mark
-MANUAL_SAFE = set()    # user-placed safe nodes
-FEATURED_SAFE = set()  # highlighted safest (farthest from hazards)
+SAFE_NODES = []
+N_SAFE = 12
+MANUAL_SAFE = set()
+FEATURED_SAFE = set()
 
 rng = np.random.default_rng(42)
 
-# -------------------- NOTIFY SHIM (no sl.notify dependency) --------------------
+# -------------------- NOTIFY SHIM --------------------
 def _notify(msg, timeout=1500):
-    # Fallback to inline message; avoids AttributeError on sl.notify
     ui_message.value = msg
 
 # -------------------- Weather fetch (stdlib-only) --------------------
@@ -137,7 +121,6 @@ def _map_center_latlon():
         cx = float((X_MIN + X_MAX) * 0.5)  # lon
         cy = float((Y_MIN + Y_MAX) * 0.5)  # lat
         return cy, cx
-    # Fallback: West Coast Park approx (lat, lon)
     return 1.2926, 103.7635
 
 def _fetch_weather_now():
@@ -202,7 +185,6 @@ def _nearest_hazard_m(pt):
 def _hazard_radius_at(h):
     return float(h.get("r_m", 0.0))
 
-# ---- Pasquill–Gifford sigmas (quick rural approximations) ----
 def _sigmas_yz(x_m, cls):
     x = max(1.0, float(x_m)); c = cls.upper()
     if c == "A":  sig_y = 0.22 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.20 * x
@@ -213,7 +195,6 @@ def _sigmas_yz(x_m, cls):
     else:         sig_y = 0.04 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.016 * x * (1 + 0.0003 * x) ** (-1.0)
     return max(sig_y, 0.5), max(sig_z, 0.5)
 
-# -------------------- LOCATION PHRASE -> MAP POINT --------------------
 def _point_from_phrase(phrase: str):
     if not phrase:
         return None
@@ -232,7 +213,6 @@ def _point_from_phrase(phrase: str):
     cx = xmin + dx * 0.5
     cy = ymin + dy * 0.5
 
-    # bearing (optional distance)
     m_deg = re.search(r'(-?\d+(?:\.\d+)?)\s*(?:deg|degrees|°)?', p)
     m_dist = re.search(r'(\d+(?:\.\d+)?)\s*(?:m|meter|meters|metre|metres)\b', p)
 
@@ -286,7 +266,6 @@ def _point_from_phrase(phrase: str):
         return np.array(centers["center"], dtype=float)
     return None
 
-# -------------------- SAFE ZONE COMPUTATION --------------------
 def _recompute_safe_nodes():
     global SAFE_NODES
     if len(NODE_POS) == 0:
@@ -315,7 +294,6 @@ def _nearest_safe_node_from(node_id):
             best_len, best_target = L, t
     return best_target if best_target is not None else node_id
 
-# ---- featured safe nodes ----
 def _recompute_featured_safe():
     global FEATURED_SAFE
     pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
@@ -328,9 +306,8 @@ def _recompute_featured_safe():
         _, d = _nearest_hazard_m(np.array([x, y], float))
         scored.append((nid, d))
     scored.sort(key=lambda t: t[1], reverse=True)
-    FEATURED_SAFE = set([nid for nid, _ in scored[:max(1, min(4, len(scored)))]])
+    FEATURED_SAFE = set([nid for nid, _ in scored[:max(1, min(4, len(scored)))] ])
 
-# -------------------- AFFECTED-ENVELOPE TEST --------------------
 def _is_person_expected_affected(pt_xy, t):
     if not HAZARDS: return False
     h, d_m = _nearest_hazard_m(pt_xy)
@@ -338,7 +315,6 @@ def _is_person_expected_affected(pt_xy, t):
     expected_r = float(h["r_m"]) + float(expected_growth_m.value) * float(t) + float(expected_buffer_m.value)
     return d_m <= max(0.0, expected_r)
 
-# -------------------- SPAWN / TARGETING / RESET --------------------
 def _spawn_people(n):
     global PEOPLE
     cyclists_target = int(round(n * float(pct_cyclists.value)/100.0))
@@ -383,7 +359,6 @@ def reset_model():
     _recompute_featured_safe()
     tick.value += 1
 
-# -------------------- DYNAMICS --------------------
 def _update_panic(p):
     p["panic"] = min(1.0, p["panic"] + 0.02)
     if (not p["is_cyclist"]) and (p["panic"] > p["panic_thr"]):
@@ -470,7 +445,6 @@ def _step_once():
 
     tick.value += 1
 
-# -------------------- KPI --------------------
 def _path_remaining_meters(p):
     path = p["path"]; k = p["path_idx"]
     if not path or k >= len(path) - 1: return 0.0
@@ -512,7 +486,6 @@ def kpi_eta_summary():
     if not etas: return "All safe or no active evacuations."
     return f"ETA to safe zone — avg: {np.mean(etas):.1f}s | P90: {np.percentile(etas,90):.1f}s | max: {np.max(etas):.1f}s"
 
-# -------------------- GAUSSIAN PLUME (HEATMAP) --------------------
 def _plume_concentration_grid(x_domain, y_domain):
     try:
         if not HAZARDS:
@@ -559,7 +532,6 @@ def _plume_concentration_grid(x_domain, y_domain):
         last_error.value = f"Plume grid error: {repr(e)}"
         return None
 
-# -------------------- RISK (ETA) HEATMAP --------------------
 def _risk_eta_grid(x_domain, y_domain):
     ny = int(max(30, min(180, int(risk_grid.value))))
     nx = int(max(40, min(200, int(ny * 1.2))))
@@ -589,7 +561,6 @@ def _risk_eta_grid(x_domain, y_domain):
     Z = etas.reshape(X.shape)
     return gx, gy, Z
 
-# -------------------- OSM GEOMETRY → PLOTLY SEGMENTS --------------------
 def _segments_from_edges_gdf():
     seg_x, seg_y = [], []
     try:
@@ -612,7 +583,6 @@ def _segments_from_edges_gdf():
         last_error.value = f"Edge geometry error: {repr(e)}"
         return [], []
 
-# -------------------- SAFE-ZONE SUGGESTION (HEURISTIC) --------------------
 def _suggest_optimized_safe(k=None):
     global MANUAL_SAFE
     k = int(k or max(4, min(12, N_SAFE)))
@@ -635,7 +605,6 @@ def _suggest_optimized_safe(k=None):
     MANUAL_SAFE = set([NODE_IDS[i] for i in chosen])
     _recompute_featured_safe()
 
-# -------------------- CHART (Stable-trace version) --------------------
 def park_chart():
     last_error.value = ""
     try:
@@ -651,11 +620,9 @@ def park_chart():
 
         fig = go.Figure()
 
-        # ---- Prepare data for layers ----
         plume_data = _plume_concentration_grid(x_domain, y_domain) if (plume_show.value and HAZARDS) else None
         risk_data  = _risk_eta_grid(x_domain, y_domain) if risk_show.value else None
 
-        # 0) PLACEHOLDER HEATMAPS (stable trace indices)
         if plume_data is not None:
             gx, gy, conc = plume_data
             show_conc = (conc is not None) and np.isfinite(conc).any() and (float(np.nanmax(conc)) > 0)
@@ -686,16 +653,15 @@ def park_chart():
             ))
         fig.update_layout(coloraxis2=dict(colorscale="Blues"))
 
-        # 2) park edges
         fig.add_trace(go.Scatter(
             x=seg_x if seg_x else [], y=seg_y if seg_y else [], mode="lines",
             line=dict(color="rgba(80,80,80,0.5)", width=1),
             hoverinfo="skip", showlegend=False, name="paths", visible=True if (seg_x and seg_y) else False
         ))
 
-        # 3) agents
         fig.add_trace(go.Scatter(
-            x=df["x"].tolist() if not df.empty else [], y=df["y"].tolist() if not df.empty else [],
+            x=(df["x"].tolist() if not df.empty else []),
+            y=(df["y"].tolist() if not df.empty else []),
             mode="markers",
             marker=dict(
                 size=(df["size"].tolist() if not df.empty else []),
@@ -706,7 +672,6 @@ def park_chart():
             visible=False if df.empty else True
         ))
 
-        # 4) hazard circles + centers
         shapes = []
         hx_list, hy_list = [], []
         for h in HAZARDS:
@@ -727,7 +692,6 @@ def park_chart():
             visible=True if hx_list else False
         ))
 
-        # 5) safe zones bg / fg
         safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
         sx_bg, sy_bg, sx_fg, sy_fg = [], [], [], []
         for nid in safe_pool:
@@ -750,7 +714,6 @@ def park_chart():
             visible=True if sx_fg else False
         ))
 
-        # 6) evac-path overlays
         px, py = ([], [])
         if qc_show_paths.value:
             px, py = _collect_paths_polylines(evac_only=True, max_agents=1000)
@@ -783,7 +746,6 @@ def park_chart():
             title="Chart failed to render — see 'Render error' text above.",
         ))
 
-# -------------------- QUALITY CHECK HELPERS --------------------
 def _min_hazard_distance_at_xy(xy):
     if not HAZARDS:
         return float("inf")
@@ -833,7 +795,6 @@ def qc_run(expected_margin_m=25.0):
     issues = []
     rows = []
 
-    # A. Safe zone checks
     safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
     if not safe_pool:
         issues.append("No safe zones computed or placed yet.")
@@ -849,7 +810,6 @@ def qc_run(expected_margin_m=25.0):
             if suspicious > 0:
                 issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre.")
 
-    # B. Graph reachability
     tnow = float(tick.value)
     evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
     summaries.append(f"Evacuees detected now: {len(evacuees)} / {len(PEOPLE)} total")
@@ -884,7 +844,6 @@ def qc_run(expected_margin_m=25.0):
         top = sorted(load_per_safe.items(), key=lambda kv: kv[1], reverse=True)[:5]
         summaries.append("Top safe-node loads: " + ", ".join([f"{nid}:{cnt}" for nid,cnt in top]))
 
-    # D. Non-affected shouldn't move
     still_but_marked = 0
     for p in PEOPLE:
         if not _is_person_expected_affected(p["pos"], tnow) and (np.linalg.norm(p.get("dir", np.zeros(2))) > 1e-6):
@@ -910,6 +869,36 @@ def qc_run(expected_margin_m=25.0):
 # -------------------- UI --------------------
 @sl.component
 def Controls():
+    # ---------- local states for ALL editable textboxes ----------
+    # QC margin
+    qc_margin_s, set_qc_margin_s = sl.use_state(f"{float(qc_km_margin.value):.1f}")
+    # Incident add
+    incident_where_s, set_incident_where_s = sl.use_state("")
+    # Remove hazard by ID
+    remove_id_s, set_remove_id_s = sl.use_state("")
+    # Safe-zone phrase
+    safe_phrase_s, set_safe_phrase_s = sl.use_state("")
+    # Consolidated parameters
+    people_s, set_people_s = sl.use_state(str(int(num_people.value)))
+    cyclists_s, set_cyclists_s = sl.use_state(str(int(pct_cyclists.value)))
+    hz_radius_s, set_hz_radius_s = sl.use_state(f"{float(hazard_radius.value):.1f}")
+    hz_spread_s, set_hz_spread_s = sl.use_state(f"{float(hazard_spread.value):.2f}")
+    exp_growth_s, set_exp_growth_s = sl.use_state(f"{float(expected_growth_m.value):.2f}")
+    exp_buffer_s, set_exp_buffer_s = sl.use_state(f"{float(expected_buffer_m.value):.1f}")
+    wind_deg_s, set_wind_deg_s = sl.use_state(f"{float(wind_deg.value):.1f}")
+    wind_speed_s, set_wind_speed_s = sl.use_state(f"{float(wind_speed.value):.2f}")
+    base_aw_s, set_base_aw_s = sl.use_state(f"{float(base_awareness_lag.value):.1f}")
+    plume_show_s, set_plume_show_s = sl.use_state("true" if plume_show.value else "false")
+    plume_stab_s, set_plume_stab_s = sl.use_state(plume_stab.value)
+    plume_Q_s, set_plume_Q_s = sl.use_state(f"{float(plume_Q_gs.value):.1f}")
+    plume_H_s, set_plume_H_s = sl.use_state(f"{float(plume_H_m.value):.1f}")
+    plume_range_s, set_plume_range_s = sl.use_state(f"{float(plume_range_m.value):.1f}")
+    plume_grid_s, set_plume_grid_s = sl.use_state(str(int(plume_grid.value)))
+    risk_show_s, set_risk_show_s = sl.use_state("true" if risk_show.value else "false")
+    risk_grid_s, set_risk_grid_s = sl.use_state(str(int(risk_grid.value)))
+    risk_speed_s, set_risk_speed_s = sl.use_state(f"{float(risk_speed_mps.value):.2f}")
+
+    # ---------- sim controls ----------
     def on_step(): _step_once()
 
     async def loop_runner():
@@ -924,107 +913,67 @@ def Controls():
         else:
             running.value = False
 
-    # Start runtime info loop once (idempotent)
     if not _runtime_loop_started.value:
         _runtime_loop_started.value = True
         asyncio.get_event_loop().create_task(_runtime_info_loop())
 
-    # ---------------- Consolidated PARAMETER TEXTBOXES ----------------
-    # Mirror strings that DO NOT push changes until "Apply Parameters"
-    p_people_str        = sl.reactive(str(int(num_people.value)))
-    p_cyclists_str      = sl.reactive(str(int(pct_cyclists.value)))
-    p_hz_radius_str     = sl.reactive(f"{float(hazard_radius.value):.1f}")
-    p_hz_spread_str     = sl.reactive(f"{float(hazard_spread.value):.2f}")
-    p_exp_growth_str    = sl.reactive(f"{float(expected_growth_m.value):.2f}")
-    p_exp_buffer_str    = sl.reactive(f"{float(expected_buffer_m.value):.1f}")
-    p_wind_deg_str      = sl.reactive(f"{float(wind_deg.value):.1f}")
-    p_wind_speed_str    = sl.reactive(f"{float(wind_speed.value):.2f}")
-    p_base_aw_str       = sl.reactive(f"{float(base_awareness_lag.value):.1f}")
-    p_plume_show_str    = sl.reactive("true" if plume_show.value else "false")
-    p_plume_stab_str    = sl.reactive(plume_stab.value)
-    p_plume_Q_str       = sl.reactive(f"{float(plume_Q_gs.value):.1f}")
-    p_plume_H_str       = sl.reactive(f"{float(plume_H_m.value):.1f}")
-    p_plume_range_str   = sl.reactive(f"{float(plume_range_m.value):.1f}")
-    p_plume_grid_str    = sl.reactive(str(int(plume_grid.value)))
-    p_risk_show_str     = sl.reactive("true" if risk_show.value else "false")
-    p_risk_grid_str     = sl.reactive(str(int(risk_grid.value)))
-    p_risk_speed_str    = sl.reactive(f"{float(risk_speed_mps.value):.2f}")
-
+    # ---------- APPLY / QC handlers (read from local states ONLY) ----------
     def on_apply_parameters():
-        # Parse all at once; if any parse fails, we keep prior value for that field
         try:
-            v = int((p_people_str.value or "").strip())
-            num_people.value = max(0, v)
+            num_people.value = max(0, int((people_s or "").strip()))
         except: pass
         try:
-            v = int((p_cyclists_str.value or "").strip())
-            pct_cyclists.value = max(0, min(100, v))
+            pct_cyclists.value = max(0, min(100, int((cyclists_s or "").strip())))
+        except: pass
+        try: hazard_radius.value = max(0.0, float((hz_radius_s or '').strip()))
+        except: pass
+        try: hazard_spread.value = max(0.0, float((hz_spread_s or '').strip()))
+        except: pass
+        try: expected_growth_m.value = max(0.0, float((exp_growth_s or '').strip()))
+        except: pass
+        try: expected_buffer_m.value = max(0.0, float((exp_buffer_s or '').strip()))
+        except: pass
+        try: wind_deg.value = float((wind_deg_s or '').strip()) % 360.0
+        except: pass
+        try: wind_speed.value = max(0.0, float((wind_speed_s or '').strip()))
+        except: pass
+        try: base_awareness_lag.value = max(0.0, float((base_aw_s or '').strip()))
         except: pass
         try:
-            hazard_radius.value = max(0.0, float((p_hz_radius_str.value or '').strip()))
-        except: pass
-        try:
-            hazard_spread.value = max(0.0, float((p_hz_spread_str.value or '').strip()))
-        except: pass
-        try:
-            expected_growth_m.value = max(0.0, float((p_exp_growth_str.value or '').strip()))
-        except: pass
-        try:
-            expected_buffer_m.value = max(0.0, float((p_exp_buffer_str.value or '').strip()))
-        except: pass
-        try:
-            wind_deg.value = float((p_wind_deg_str.value or '').strip()) % 360.0
-        except: pass
-        try:
-            wind_speed.value = max(0.0, float((p_wind_speed_str.value or '').strip()))
-        except: pass
-        try:
-            base_awareness_lag.value = max(0.0, float((p_base_aw_str.value or '').strip()))
-        except: pass
-        try:
-            s = (p_plume_show_str.value or "").strip().lower()
+            s = (plume_show_s or "").strip().lower()
             plume_show.value = s in ("1","true","yes","y","on")
         except: pass
         try:
-            s = (p_plume_stab_str.value or "").strip().upper()
+            s = (plume_stab_s or "").strip().upper()
             if s in ("A","B","C","D","E","F"):
                 plume_stab.value = s
         except: pass
-        try:
-            plume_Q_gs.value = max(0.0, float((p_plume_Q_str.value or '').strip()))
+        try: plume_Q_gs.value = max(0.0, float((plume_Q_s or '').strip()))
+        except: pass
+        try: plume_H_m.value = max(0.0, float((plume_H_s or '').strip()))
+        except: pass
+        try: plume_range_m.value = max(0.0, float((plume_range_s or '').strip()))
+        except: pass
+        try: plume_grid.value = max(1, int((plume_grid_s or '').strip()))
         except: pass
         try:
-            plume_H_m.value = max(0.0, float((p_plume_H_str.value or '').strip()))
-        except: pass
-        try:
-            plume_range_m.value = max(0.0, float((p_plume_range_str.value or '').strip()))
-        except: pass
-        try:
-            plume_grid.value = max(1, int((p_plume_grid_str.value or '').strip()))
-        except: pass
-        try:
-            s = (p_risk_show_str.value or "").strip().lower()
+            s = (risk_show_s or "").strip().lower()
             risk_show.value = s in ("1","true","yes","y","on")
         except: pass
-        try:
-            risk_grid.value = max(1, int((p_risk_grid_str.value or '').strip()))
+        try: risk_grid.value = max(1, int((risk_grid_s or '').strip()))
         except: pass
-        try:
-            risk_speed_mps.value = max(0.1, float((p_risk_speed_str.value or '').strip()))
+        try: risk_speed_mps.value = max(0.1, float((risk_speed_s or '').strip()))
         except: pass
 
-        # Recompute dependent items but DO NOT wipe inputs
         _recompute_safe_nodes()
         _recompute_featured_safe()
         _choose_targets_and_paths()
         tick.value += 1
         _notify("Parameters applied.")
 
-    # ---------------- QC margin textbox + button ----------------
-    qc_margin_str = sl.reactive(f"{float(qc_km_margin.value):.1f}")
     def on_qc_margin_submit():
         try:
-            qc_km_margin.value = max(0.0, float((qc_margin_str.value or '').strip()))
+            qc_km_margin.value = max(0.0, float((qc_margin_s or '').strip()))
             _notify("QC margin updated.")
         except:
             _notify("Enter a numeric QC margin (m).")
@@ -1053,7 +1002,9 @@ def Controls():
             _notify(f"Export failed: {e}")
 
     with sl.Row():
-        sl.InputText("Flag safe-zone if within X m of a hazard", value=qc_margin_str, continuous_update=False, placeholder="e.g., 25")
+        sl.InputText("Flag safe-zone if within X m of a hazard",
+                     value=qc_margin_s, on_value=set_qc_margin_s,
+                     continuous_update=True, placeholder="e.g., 25")
         sl.Button("Apply QC Margin", on_click=on_qc_margin_submit)
         sl.Checkbox(label="Show evac paths overlay", value=qc_show_paths)
 
@@ -1072,7 +1023,7 @@ def Controls():
     if ui_message.value:
         sl.Markdown(f"> **{ui_message.value}**")
 
-    # --- Hazard controls (unchanged buttons) ---
+    # --- Hazard controls ---
     def on_reset():
         running.value = False
         reset_model()
@@ -1086,7 +1037,7 @@ def Controls():
         _notify("Hazards cleared.")
 
     def on_submit_location():
-        txt = (location_text.value or "").strip()
+        txt = (incident_where_s or "").strip()
         pt = _point_from_phrase(txt)
         if pt is None:
             _notify("Could not parse location. Try: North, South, East, West, North West, NE, Center")
@@ -1104,10 +1055,8 @@ def Controls():
         tick.value += 1
         _notify("Hazard added.")
 
-    # remove by ID / last
-    remove_id_text = sl.reactive("")
     def on_remove_by_id():
-        txt = (remove_id_text.value or "").strip()
+        txt = (remove_id_s or "").strip()
         if not txt.isdigit():
             _notify("Enter a numeric hazard ID."); return
         hid = int(txt)
@@ -1129,29 +1078,6 @@ def Controls():
         _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
         _notify(f"Last hazard {hid} removed.")
 
-    # Manual Safe Zones + Optimize (unchanged buttons)
-    safe_phrase = sl.reactive("")
-    def _add_manual_safe_by_phrase(phrase: str):
-        pt = _point_from_phrase(phrase)
-        if pt is None: return False
-        _, node_id = _nearest_node_idx(pt[0], pt[1])
-        MANUAL_SAFE.add(node_id); return True
-    def on_add_safe():
-        txt = (safe_phrase.value or "").strip()
-        if not txt:
-            _notify("Enter a phrase like 'North West', 'Center', 'SE'."); return
-        ok = _add_manual_safe_by_phrase(txt)
-        if not ok:
-            _notify("Could not parse phrase; try: North, South, East, West, NE, NW, SE, SW, Center."); return
-        _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-        _notify("Manual safe zone added.")
-    def on_clear_safe():
-        MANUAL_SAFE.clear(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-        _notify("Manual safe zones cleared.")
-    def on_optimize():
-        _suggest_optimized_safe(k=N_SAFE); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-        _notify("Optimized safe zones suggested.")
-
     with sl.Column():
         sl.Markdown("### Controls")
         with sl.Row():
@@ -1160,29 +1086,28 @@ def Controls():
             sl.Button("RESET", on_click=on_reset)
             sl.Markdown(f"**Tick:** {int(tick.value)}")
 
-        # ---- Live runtime info header ----
         with sl.Row(gap="10px"):
             sl.Markdown(f"**Local time:** {time_str.value or '-'}")
             sl.Markdown(f"**Date:** {date_str.value or '-'}")
             sl.Markdown(f"**Weather:** {weather_str.value or '—'}")
 
-        # ---- INCIDENTS (keep) ----
         sl.Markdown("**Incidents (Hazards):** Add multiple or remove by ID")
         with sl.Row():
             sl.InputText(
                 label="Where is it:",
-                value=location_text,
-                continuous_update=False,
+                value=incident_where_s, on_value=set_incident_where_s,
+                continuous_update=True,
                 placeholder="e.g., North  |  NE  |  160°  |  North, 160 degrees  |  225°, 300m"
             )
             sl.Button("Submit", on_click=on_submit_location)
             sl.Button("Clear Hazards", on_click=on_clear_hazards)
         with sl.Row():
-            sl.InputText(label="Remove Hazard ID", value=remove_id_text, continuous_update=False, placeholder="e.g., 2")
+            sl.InputText(label="Remove Hazard ID",
+                         value=remove_id_s, on_value=set_remove_id_s,
+                         continuous_update=True, placeholder="e.g., 2")
             sl.Button("Remove by ID", on_click=on_remove_by_id)
             sl.Button("Remove Last", on_click=on_remove_last)
 
-        # List current hazards with per-row delete buttons
         if HAZARDS:
             sl.Markdown("**Current Hazards**")
             for h in list(HAZARDS):
@@ -1204,43 +1129,60 @@ def Controls():
                         return _inner
                     sl.Button("Remove", on_click=_mk_remove(hid))
 
-        # ---------------- CONSOLIDATED PARAMETER AREA ----------------
         sl.Markdown("### Scenario Parameters (consolidated)")
         with sl.Column():
             with sl.Row():
-                sl.InputText("People (initial)", value=p_people_str, continuous_update=False, placeholder="e.g., 200")
-                sl.InputText("Cyclists (%)", value=p_cyclists_str, continuous_update=False, placeholder="0-100")
+                sl.InputText("People (initial)", value=people_s, on_value=set_people_s, continuous_update=True, placeholder="e.g., 200")
+                sl.InputText("Cyclists (%)", value=cyclists_s, on_value=set_cyclists_s, continuous_update=True, placeholder="0-100")
             with sl.Row():
-                sl.InputText("Hazard radius (new, m)", value=p_hz_radius_str, continuous_update=False, placeholder="e.g., 40.0")
-                sl.InputText("Radius spread / step (m/step)", value=p_hz_spread_str, continuous_update=False, placeholder="e.g., 1.2")
+                sl.InputText("Hazard radius (new, m)", value=hz_radius_s, on_value=set_hz_radius_s, continuous_update=True, placeholder="e.g., 40.0")
+                sl.InputText("Radius spread / step (m/step)", value=hz_spread_s, on_value=set_hz_spread_s, continuous_update=True, placeholder="e.g., 1.2")
             with sl.Row():
-                sl.InputText("Expected growth (m/step)", value=p_exp_growth_str, continuous_update=False, placeholder="e.g., 3.0")
-                sl.InputText("Expected safety buffer (m)", value=p_exp_buffer_str, continuous_update=False, placeholder="e.g., 0.0")
+                sl.InputText("Expected growth (m/step)", value=exp_growth_s, on_value=set_exp_growth_s, continuous_update=True, placeholder="e.g., 3.0")
+                sl.InputText("Expected safety buffer (m)", value=exp_buffer_s, on_value=set_exp_buffer_s, continuous_update=True, placeholder="e.g., 0.0")
             with sl.Row():
-                sl.InputText("Wind (deg)", value=p_wind_deg_str, continuous_update=False, placeholder="0-360")
-                sl.InputText("Wind speed (m/s)", value=p_wind_speed_str, continuous_update=False, placeholder="e.g., 1.0")
+                sl.InputText("Wind (deg)", value=wind_deg_s, on_value=set_wind_deg_s, continuous_update=True, placeholder="0-360")
+                sl.InputText("Wind speed (m/s)", value=wind_speed_s, on_value=set_wind_speed_s, continuous_update=True, placeholder="e.g., 1.0")
             with sl.Row():
-                sl.InputText("Base awareness lag (s)", value=p_base_aw_str, continuous_update=False, placeholder="e.g., 8.0")
-                sl.InputText("Show plume (true/false)", value=p_plume_show_str, continuous_update=False, placeholder="true/false")
+                sl.InputText("Base awareness lag (s)", value=base_aw_s, on_value=set_base_aw_s, continuous_update=True, placeholder="e.g., 8.0")
+                sl.InputText("Show plume (true/false)", value=plume_show_s, on_value=set_plume_show_s, continuous_update=True, placeholder="true/false")
             with sl.Row():
-                sl.InputText("Stability (A–F)", value=p_plume_stab_str, continuous_update=False, placeholder="A..F")
-                sl.InputText("Q (g/s)", value=p_plume_Q_str, continuous_update=False, placeholder="e.g., 100")
+                sl.InputText("Stability (A–F)", value=plume_stab_s, on_value=set_plume_stab_s, continuous_update=True, placeholder="A..F")
+                sl.InputText("Q (g/s)", value=plume_Q_s, on_value=set_plume_Q_s, continuous_update=True, placeholder="e.g., 100")
             with sl.Row():
-                sl.InputText("Stack height H (m)", value=p_plume_H_str, continuous_update=False, placeholder="e.g., 20")
-                sl.InputText("Plume range (m)", value=p_plume_range_str, continuous_update=False, placeholder="e.g., 1500")
+                sl.InputText("Stack height H (m)", value=plume_H_s, on_value=set_plume_H_s, continuous_update=True, placeholder="e.g., 20")
+                sl.InputText("Plume range (m)", value=plume_range_s, on_value=set_plume_range_s, continuous_update=True, placeholder="e.g., 1500")
             with sl.Row():
-                sl.InputText("Heatmap resolution (rows)", value=p_plume_grid_str, continuous_update=False, placeholder="e.g., 90")
-                sl.InputText("Show risk heatmap (true/false)", value=p_risk_show_str, continuous_update=False, placeholder="true/false")
+                sl.InputText("Heatmap resolution (rows)", value=plume_grid_s, on_value=set_plume_grid_s, continuous_update=True, placeholder="e.g., 90")
+                sl.InputText("Show risk heatmap (true/false)", value=risk_show_s, on_value=set_risk_show_s, continuous_update=True, placeholder="true/false")
             with sl.Row():
-                sl.InputText("Risk grid rows", value=p_risk_grid_str, continuous_update=False, placeholder="e.g., 90")
-                sl.InputText("Risk walking speed (m/s)", value=p_risk_speed_str, continuous_update=False, placeholder="e.g., 1.4")
+                sl.InputText("Risk grid rows", value=risk_grid_s, on_value=set_risk_grid_s, continuous_update=True, placeholder="e.g., 90")
+                sl.InputText("Risk walking speed (m/s)", value=risk_speed_s, on_value=set_risk_speed_s, continuous_update=True, placeholder="e.g., 1.4")
             with sl.Row():
                 sl.Button("Apply Parameters", on_click=on_apply_parameters)
 
-        # ---- Manual / optimized safe zones (keep) ----
         sl.Markdown("**Safe Zones — manual & optimize**")
         with sl.Row():
-            sl.InputText(label="Add Safe Zone (phrase)", value=safe_phrase, continuous_update=False, placeholder="North East")
+            sl.InputText(label="Add Safe Zone (phrase)",
+                         value=safe_phrase_s, on_value=set_safe_phrase_s,
+                         continuous_update=True, placeholder="North East")
+            def on_add_safe():
+                txt = (safe_phrase_s or "").strip()
+                if not txt:
+                    _notify("Enter a phrase like 'North West', 'Center', 'SE'."); return
+                pt = _point_from_phrase(txt)
+                if pt is None:
+                    _notify("Could not parse phrase; try: North, South, East, West, NE, NW, SE, SW, Center."); return
+                _, node_id = _nearest_node_idx(pt[0], pt[1])
+                MANUAL_SAFE.add(node_id)
+                _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+                _notify("Manual safe zone added.")
+            def on_clear_safe():
+                MANUAL_SAFE.clear(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+                _notify("Manual safe zones cleared.")
+            def on_optimize():
+                _suggest_optimized_safe(k=N_SAFE); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+                _notify("Optimized safe zones suggested.")
             sl.Button("Add Safe Zone Here", on_click=on_add_safe)
             sl.Button("Clear Safe Zones", on_click=on_clear_safe)
             sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize)
@@ -1250,7 +1192,7 @@ def Controls():
 
 @sl.component
 def Page():
-    _ = tick.value  # subscribe to re-render
+    _ = tick.value
     chart = park_chart()
     with sl.Column():
         sl.Markdown("## West Coast Park — Evacuation (Solara)")
@@ -1259,7 +1201,6 @@ def Page():
         sl.Markdown(f"**{kpi_eta_summary()}**")
         sl.FigurePlotly(chart)
 
-# Solara entry point
 page = Page
 reset_model()
 _recompute_safe_nodes()
