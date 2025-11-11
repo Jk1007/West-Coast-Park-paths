@@ -351,6 +351,17 @@ def _choose_targets_and_paths():
     for p in PEOPLE:
         _retarget_to_nearest_safe(p)
 
+def _force_evacuation_mode():
+    """Immediately set every agent to evacuate toward their nearest safe node."""
+    tnow = float(tick.value)
+    for p in PEOPLE:
+        p["aware"] = True
+        # mark them as 'affected' starting now and immediately retarget
+        p["affected_since"] = tnow
+        p["reached"] = False
+        _retarget_to_nearest_safe(p)
+
+
 def reset_model():
     global PEOPLE
     PEOPLE = []
@@ -382,32 +393,46 @@ def _advance_hazards():
 def _step_once():
     _advance_hazards()
     tnow = float(tick.value)
+    global_hazard = bool(HAZARDS)  # if any hazard exists, everyone evacuates
 
     for p in PEOPLE:
-        affected = _is_person_expected_affected(p["pos"], tnow)
+        # Determine if this person should evacuate this tick
+        if global_hazard:
+            affected = True
+            # make sure they are aware and have a target right away
+            if not p.get("aware", False):
+                p["aware"] = True
+                p["affected_since"] = tnow
+                _retarget_to_nearest_safe(p)
+        else:
+            affected = _is_person_expected_affected(p["pos"], tnow)
 
         if not affected:
             p["aware"] = False
             p["dir"] = np.array([0.0, 0.0])
             continue
 
-        if p["affected_since"] is None:
-            p["affected_since"] = tnow
-            _retarget_to_nearest_safe(p)
+        # If we’re in global hazard mode, skip any awareness lag logic entirely.
+        if (not global_hazard) and (not p["aware"]):
+            if (tnow - (p["affected_since"] or tnow)) < max(0.0, p["aware_delay"]):
+                p["dir"] = np.array([0.0, 0.0])
+                continue
+            p["aware"] = True
 
-        if not p["aware"] and (tnow - p["affected_since"]) < max(0.0, p["aware_delay"]):
+        # Already arrived?
+        if p["reached"]:
             p["dir"] = np.array([0.0, 0.0])
             continue
-        p["aware"] = True
 
-        if p["reached"]:
-            p["dir"] = np.array([0.0, 0.0]); continue
-
+        # Panic/speed model (unchanged)
         _update_panic(p)
 
+        # Follow shortest path to safe node (with a stronger bias when global hazard is on)
         path = p["path"]; k = p["path_idx"]
         if k >= len(path) - 1:
-            p["reached"] = True; p["dir"] = np.array([0.0, 0.0]); continue
+            p["reached"] = True
+            p["dir"] = np.array([0.0, 0.0])
+            continue
 
         cur_xy = p["pos"]
         next_node = path[k+1]
@@ -415,22 +440,34 @@ def _step_once():
         next_xy = np.array([nx_xy[0], nx_xy[1]], dtype=float)
 
         is_panicking = p["panic"] > p["panic_thr"]
-        follow_prob = 0.7 if is_panicking else 0.85
+        # Stronger adherence to planned route when a global hazard is active
+        if global_hazard:
+            follow_prob = 0.95
+        else:
+            follow_prob = 0.7 if is_panicking else 0.85
+
         follow_path = rng.random() < follow_prob
 
         if follow_path:
-            seg = next_xy - cur_xy; dist = np.linalg.norm(seg)
+            seg = next_xy - cur_xy
+            dist = np.linalg.norm(seg)
             if dist <= p["speed"]:
-                p["pos"] = next_xy.copy(); p["path_idx"] = k + 1; move = next_xy - cur_xy
+                p["pos"] = next_xy.copy()
+                p["path_idx"] = k + 1
+                move = next_xy - cur_xy
             else:
-                stepv = _unit(seg) * p["speed"]; p["pos"] = cur_xy + stepv; move = stepv
+                stepv = _unit(seg) * p["speed"]
+                p["pos"] = cur_xy + stepv
+                move = stepv
         else:
             seg = next_xy - cur_xy
             direction = _unit(seg)
-            deviation = rng.uniform(-0.5 if is_panicking else -0.3,
-                                    0.5 if is_panicking else 0.3, 2)
+            # smaller deviation if global hazard (keep them on course)
+            dev_mag = 0.15 if global_hazard else (0.5 if is_panicking else 0.3)
+            deviation = rng.uniform(-dev_mag, dev_mag, 2)
             direction = _unit(direction + deviation)
-            stepv = direction * p["speed"]; p["pos"] = cur_xy + stepv
+            stepv = direction * p["speed"]
+            p["pos"] = cur_xy + stepv
             _, snap_idx = KD.query(p["pos"])
             snap_xy = NODE_POS[snap_idx]
             if np.linalg.norm(p["pos"] - snap_xy) < 3.0:
@@ -444,6 +481,7 @@ def _step_once():
             p["reached"] = True
 
     tick.value += 1
+
 
 def _path_remaining_meters(p):
     path = p["path"]; k = p["path_idx"]
@@ -1049,11 +1087,16 @@ def Controls():
             "r_m": float(max(5.0, hazard_radius.value)),
         })
         HAZARD_ID += 1
+
+        # Recompute safe nodes, then force everyone into evacuation mode
         _recompute_safe_nodes()
         _recompute_featured_safe()
         _choose_targets_and_paths()
+        _force_evacuation_mode()   # <<— NEW: immediate all-agents evacuation
+
         tick.value += 1
-        _notify("Hazard added.")
+        _notify("Hazard added — all agents evacuating now.")
+
 
     def on_remove_by_id():
         txt = (remove_id_s or "").strip()
