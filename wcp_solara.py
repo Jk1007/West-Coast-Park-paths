@@ -1,4 +1,4 @@
-# wcp_solara_test.py — West Coast Park evac (typed location → hazards) + nearest safe zones
+# wcp_solara_test.py — West Coast Park evac with SCDF responder deployment optimiser
 # Run:  python -m solara run wcp_solara_test.py
 
 import plotly.graph_objects as go
@@ -14,10 +14,10 @@ from datetime import datetime
 import json
 from urllib import request, parse
 import re
+import os
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
-
 G = ox.load_graphml(GRAPH_FILE)
 
 UG = nx.Graph()
@@ -112,6 +112,10 @@ N_SAFE = 12
 MANUAL_SAFE = set()
 FEATURED_SAFE = set()
 
+# --- SCDF responder deployment state ---
+RESPONDERS = set()
+N_RESPONDERS = sl.reactive(5)
+
 rng = np.random.default_rng(42)
 
 # -------------------- NOTIFY SHIM --------------------
@@ -189,14 +193,16 @@ def _hazard_radius_at(h):
     return float(h.get("r_m", 0.0))
 
 def _sigmas_yz(x_m, cls):
-    x = max(1.0, float(x_m)); c = cls.upper()
+    x = np.maximum(1.0, np.array(x_m, dtype=float))
+    c = str(cls).upper()
     if c == "A":  sig_y = 0.22 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.20 * x
     elif c == "B":sig_y = 0.16 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.12 * x
     elif c == "C":sig_y = 0.11 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.08 * x * (1 + 0.0002 * x) ** (-0.5)
     elif c == "D":sig_y = 0.08 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.06 * x * (1 + 0.0015 * x) ** (-0.5)
     elif c == "E":sig_y = 0.06 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.03 * x * (1 + 0.0003 * x) ** (-1.0)
     else:         sig_y = 0.04 * x * (1 + 0.0001 * x) ** (-0.5); sig_z = 0.016 * x * (1 + 0.0003 * x) ** (-1.0)
-    return max(sig_y, 0.5), max(sig_z, 0.5)
+    sig_y = np.maximum(sig_y, 0.5); sig_z = np.maximum(sig_z, 0.5)
+    return sig_y, sig_z
 
 def _point_from_phrase(phrase: str):
     if not phrase:
@@ -359,7 +365,6 @@ def _choose_targets_and_paths():
         _retarget_to_nearest_safe(p)
 
 def _force_evacuation_mode():
-    """Immediately set every agent to evacuate toward their nearest safe node."""
     tnow = float(tick.value)
     for p in PEOPLE:
         p["aware"] = True
@@ -401,13 +406,11 @@ def _step_once():
     global_hazard = bool(HAZARDS)  # if any hazard exists, everyone evacuates
 
     for p in PEOPLE:
-        # Determine if this person should evacuate this tick
         if global_hazard:
             affected = True
             if not p.get("aware", False):
                 p["aware"] = True
                 p["affected_since"] = tnow
-                # stamp start time if this is the first awareness under global hazard
                 if p.get("evac_start_tick") is None and EVAC_NOTIFICATION_TICK.value is not None:
                     p["evac_start_tick"] = int(EVAC_NOTIFICATION_TICK.value)
                 _retarget_to_nearest_safe(p)
@@ -419,30 +422,22 @@ def _step_once():
             p["dir"] = np.array([0.0, 0.0])
             continue
 
-        # If we’re in global hazard mode, skip any awareness lag logic entirely.
         if (not global_hazard) and (not p["aware"]):
             if (tnow - (p["affected_since"] or tnow)) < max(0.0, p["aware_delay"]):
-                p["dir"] = np.array([0.0, 0.0])
-                continue
+                p["dir"] = np.array([0.0, 0.0]); continue
             p["aware"] = True
 
-        # Already arrived?
         if p["reached"]:
-            p["dir"] = np.array([0.0, 0.0])
-            continue
+            p["dir"] = np.array([0.0, 0.0]); continue
 
-        # Panic/speed model (unchanged)
         _update_panic(p)
 
-        # Follow shortest path to safe node (with a stronger bias when global hazard is on)
         path = p["path"]; k = p["path_idx"]
         if k >= len(path) - 1:
             p["reached"] = True
             p["dir"] = np.array([0.0, 0.0])
-            # record end time
             if p.get("evac_end_tick") is None and p.get("evac_start_tick") is not None:
                 p["evac_end_tick"] = int(tick.value)
-                # treat 1 step = 1s (consistent under STEP/manual too)
                 p["evac_time_s"] = float(p["evac_end_tick"] - p["evac_start_tick"])
             continue
 
@@ -452,12 +447,7 @@ def _step_once():
         next_xy = np.array([nx_xy[0], nx_xy[1]], dtype=float)
 
         is_panicking = p["panic"] > p["panic_thr"]
-        # Stronger adherence to planned route when a global hazard is active
-        if global_hazard:
-            follow_prob = 0.95
-        else:
-            follow_prob = 0.7 if is_panicking else 0.85
-
+        follow_prob = 0.95 if global_hazard else (0.7 if is_panicking else 0.85)
         follow_path = rng.random() < follow_prob
 
         if follow_path:
@@ -474,7 +464,6 @@ def _step_once():
         else:
             seg = next_xy - cur_xy
             direction = _unit(seg)
-            # smaller deviation if global hazard (keep them on course)
             dev_mag = 0.15 if global_hazard else (0.5 if is_panicking else 0.3)
             deviation = rng.uniform(-dev_mag, dev_mag, 2)
             direction = _unit(direction + deviation)
@@ -491,7 +480,6 @@ def _step_once():
 
         if np.linalg.norm(p["pos"] - next_xy) < 2.0 and (p["path_idx"] >= len(path) - 2):
             p["reached"] = True
-            # record end time first time they reach
             if p.get("evac_end_tick") is None and p.get("evac_start_tick") is not None:
                 p["evac_end_tick"] = int(tick.value)
                 p["evac_time_s"] = float(p["evac_end_tick"] - p["evac_start_tick"])
@@ -541,7 +529,6 @@ def kpi_eta_summary():
 
 # --------- Metrics & Effectiveness ----------
 def metrics_collect():
-    """Return (per_agent_rows, summary_dict). evac_time_s for those who reached."""
     rows = []
     times = []
     total = len(PEOPLE)
@@ -572,12 +559,8 @@ def metrics_collect():
 
 def evaluate_safe_zone_effectiveness():
     t = _totals_now()
-    rows, summary = metrics_collect()  # already computes samples & percentiles
-
-    # Build times from the correct key
-    reached_times = [r["evac_time_s"] for r in rows
-                     if r.get("reached") and r.get("evac_time_s") is not None]
-
+    rows, summary = metrics_collect()
+    reached_times = [r["evac_time_s"] for r in rows if r.get("reached") and r.get("evac_time_s") is not None]
     if not reached_times:
         return (
             f"**Effectiveness (Safe Zone Deployment)**\n\n"
@@ -587,7 +570,6 @@ def evaluate_safe_zone_effectiveness():
             f"- In envelope now: {t['evacuees']}\n\n"
             f"_No agents have reached a safe zone yet — run the sim (START/STEP) and try again._"
         )
-
     return (
         f"**Effectiveness (Safe Zone Deployment)**\n\n"
         f"- Total people: {t['total']}\n"
@@ -603,11 +585,8 @@ def evaluate_safe_zone_effectiveness():
         f"(n={summary['samples']})"
     )
 
-
-
 # --------- ETA-based Safe Zone Optimization ----------
 def _average_eta_for_safe_set(safe_nodes_set, speed_mps=1.4, sample_size=400):
-    """Estimate average ETA over a sampled set of nodes given a candidate safe-node set."""
     if not safe_nodes_set:
         return float("inf")
     n = min(sample_size, len(NODE_IDS))
@@ -628,16 +607,11 @@ def _average_eta_for_safe_set(safe_nodes_set, speed_mps=1.4, sample_size=400):
     return float(np.mean(etas))
 
 def _optimize_safe_zones_by_eta(k=None, attempts=8, speed_mps=1.4, sample_size=400):
-    """
-    Try multiple greedy seeds (using hazard-distance scoring) and keep the set
-    that minimizes average ETA. Writes result to MANUAL_SAFE.
-    """
     global MANUAL_SAFE
     k = int(k or max(4, min(12, N_SAFE)))
     if not NODE_POS.size:
         return False
 
-    # base scores similar to _suggest_optimized_safe
     if HAZARDS:
         scores = np.array([_nearest_hazard_m(NODE_POS[i])[1] for i in range(NODE_POS.shape[0])], float)
     else:
@@ -674,11 +648,12 @@ def _optimize_safe_zones_by_eta(k=None, attempts=8, speed_mps=1.4, sample_size=4
         return True
     return False
 
+# --------- Plume/Risk grids ----------
 def _plume_concentration_grid(x_domain, y_domain):
     try:
         if not HAZARDS:
             return None
-        nxg = int(max(40, min(180, int(plume_grid.value * 1.2))))
+        nxg = int(max(40, min(180, int(plume_grid.value * 1.2))))  # <-- FIXED extra ')'
         nyg = int(max(30, min(150, int(plume_grid.value))))
         gx = np.linspace(x_domain[0], x_domain[1], nxg)
         gy = np.linspace(y_domain[0], y_domain[1], nyg)
@@ -702,17 +677,15 @@ def _plume_concentration_grid(x_domain, y_domain):
             y_m = -dx_m * ey + dy_m * ex
             mask = (x_m > 1.0) & (x_m <= maxx)
             if not np.any(mask): continue
-            sigy = np.ones_like(x_m); sigz = np.ones_like(x_m)
             xm_clip = np.clip(x_m, 1.0, None)
-            idx = np.where(mask)
-            sy, sz = _sigmas_yz(xm_clip[idx], stab)
-            sigy[idx] = sy; sigz[idx] = sz
+            sy, sz = _sigmas_yz(xm_clip, stab)
             pref = Q / (2.0 * math.pi * U)
-            termy = np.exp(-(y_m ** 2) / (2.0 * sigy ** 2))
-            termz = (np.exp(-((0.0 - H) ** 2) / (2.0 * sigz ** 2))
-                     + np.exp(-((0.0 + H) ** 2) / (2.0 * sigz ** 2)))
-            denom = sigy * sigz
+            termy = np.exp(-(y_m ** 2) / (2.0 * sy ** 2))
+            termz = (np.exp(-((0.0 - H) ** 2) / (2.0 * sz ** 2))
+                     + np.exp(-((0.0 + H) ** 2) / (2.0 * sz ** 2)))
+            denom = sy * sz
             contrib = np.zeros_like(C)
+            idx = np.where(mask)
             contrib[idx] = pref * termy[idx] * termz[idx] / denom[idx]
             C += contrib
         return gx, gy, C
@@ -792,6 +765,678 @@ def _suggest_optimized_safe(k=None):
         chosen.append(int(nxt))
     MANUAL_SAFE = set([NODE_IDS[i] for i in chosen])
     _recompute_featured_safe()
+
+# --------- SCDF Responder Deployment Optimiser ----------
+def _build_response_demand(x_domain, y_domain):
+    """
+    Return gx, gy, demand (higher = more need).
+    Combines: plume (normalized), risk ETA (normalized), unaware density, distance-to-hazard penalty,
+    distance-to-safe small boost. All terms scaled to [0,1] before combination.
+    """
+    # Base grids
+    risk = _risk_eta_grid(x_domain, y_domain)[2] if risk_show.value else None
+    plume = _plume_concentration_grid(x_domain, y_domain)
+    if plume is not None:
+        pgx, pgy, pZ = plume
+    else:
+        # build a blank plume grid aligned with risk resolution if available
+        rx, ry, rZ = _risk_eta_grid(x_domain, y_domain)
+        pgx, pgy, pZ = rx, ry, np.zeros_like(rZ)
+
+    # Resample risk onto plume grid if needed
+    rx, ry, rZ = _risk_eta_grid(x_domain, y_domain)
+    if (rZ.shape != pZ.shape):
+        # crude nearest resize to plume resolution
+        pny, pnx = pZ.shape
+        rny, rnx = rZ.shape
+        iy = (np.linspace(0, rny - 1, pny)).astype(int)
+        ix = (np.linspace(0, rnx - 1, pnx)).astype(int)
+        rZr = rZ[iy][:, ix]
+    else:
+        rZr = rZ
+
+    # Normalize helpers
+    def _norm(a):
+        a = np.array(a, dtype=float)
+        m = np.nanmin(a); M = np.nanmax(a)
+        if not np.isfinite(m) or not np.isfinite(M) or M - m < 1e-9:
+            return np.zeros_like(a)
+        out = (a - m) / (M - m)
+        out[~np.isfinite(out)] = 0.0
+        return out
+
+    plume_n = _norm(pZ)
+    risk_n = _norm(rZr)
+
+    # Unaware density (agents not aware & not yet reached) onto plume grid
+    px = pgx; py = pgy
+    X, Y = np.meshgrid(px, py)
+    unaware = np.zeros_like(X, dtype=float)
+    tnow = float(tick.value)
+    for p in PEOPLE:
+        if p.get("reached", False): 
+            continue
+        aware = bool(p.get("aware", False))
+        affected = _is_person_expected_affected(p["pos"], tnow)
+        if (not aware) and affected:
+            # deposit a small kernel at nearest pixel
+            x, y = float(p["pos"][0]), float(p["pos"][1])
+            ix = np.argmin(np.abs(px - x))
+            iy = np.argmin(np.abs(py - y))
+            if 0 <= iy < unaware.shape[0] and 0 <= ix < unaware.shape[1]:
+                unaware[iy, ix] += 1.0
+    unaware = _norm(unaware)
+
+    # Distance-to-hazard (prefer not too close)
+    hazard_penalty = np.zeros_like(X, dtype=float)
+    if HAZARDS:
+        # compute min distance to any hazard centre in meters
+        for i in range(X.shape[0]):
+            for j in range(X.shape[1]):
+                pt = np.array([X[i, j], Y[i, j]])
+                _, d_m = _nearest_hazard_m(pt)
+                # penalty is high near hazard, low far
+                hazard_penalty[i, j] = 1.0 - (1.0 / (1.0 + d_m / 50.0))
+        hazard_penalty = _norm(hazard_penalty)
+    else:
+        hazard_penalty[:] = 0.2  # small constant if no hazards
+
+    # Distance-to-nearest-safe (areas far from safe zones get small boost)
+    safe_boost = np.zeros_like(X, dtype=float)
+    pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if pool:
+        for i in range(X.shape[0]):
+            for j in range(X.shape[1]):
+                _, idx = KD.query([X[i, j], Y[i, j]])
+                nid = NODE_IDS[idx]
+                tnode = _nearest_safe_node_from(nid)
+                d = _nx_path_length(nid, tnode)
+                safe_boost[i, j] = d if np.isfinite(d) else 0.0
+        safe_boost = _norm(safe_boost)
+
+    # Combine (weights can be tuned)
+    # Demand ~ 0.35*plume + 0.35*risk + 0.2*unaware + 0.1*safe_boost - 0.15*hazard_penalty
+    demand = (0.35 * plume_n) + (0.35 * risk_n) + (0.20 * unaware) + (0.10 * safe_boost) - (0.15 * hazard_penalty)
+    demand = np.maximum(demand, 0.0)
+    return pgx, pgy, demand
+
+def _suggest_responders(k=5):
+    """Place k responder staging nodes near the peaks of response demand, while spreading them out."""
+    global RESPONDERS
+    if k <= 0:
+        RESPONDERS = set(); return False
+    # domain from nodes
+    xmin, ymin = NODE_POS.min(axis=0)
+    xmax, ymax = NODE_POS.max(axis=0)
+    padx = max((xmax - xmin) * 0.03, 1.0)
+    pady = max((ymax - ymin) * 0.03, 1.0)
+    x_domain = [float(xmin - padx), float(xmax + padx)]
+    y_domain = [float(ymin - pady), float(ymax + pady)]
+
+    pgx, pgy, demand = _build_response_demand(x_domain, y_domain)
+    if demand is None or not np.isfinite(demand).any():
+        RESPONDERS = set(); return False
+
+    # Pick top M pixels by demand, map to nearest nodes, then do farthest-point sampling
+    M = int(max(50, 10 * k))
+    flat = demand.ravel()
+    if flat.size < M:
+        M = flat.size
+    top_idx = np.argpartition(-flat, M-1)[:M]
+    iy, ix = np.unravel_index(top_idx, demand.shape)
+    cand_pts = np.column_stack([pgx[ix], pgy[iy]])
+
+    # snap to nearest graph nodes
+    _, nidxs = KD.query(cand_pts)
+    node_cands = [NODE_IDS[i] for i in nidxs]
+
+    # remove duplicates while preserving order
+    seen = set(); unique_nodes = []
+    for nid in node_cands:
+        if nid in seen: continue
+        seen.add(nid); unique_nodes.append(nid)
+    if not unique_nodes:
+        RESPONDERS = set(); return False
+
+    # farthest-point sampling on node coordinates
+    chosen = [unique_nodes[0]]
+    for _ in range(1, k):
+        best = None; best_d = -1.0
+        for nid in unique_nodes:
+            if nid in chosen: continue
+            # distance to nearest chosen (map-distance)
+            pt = np.array(POS_DICT[nid])
+            dmin = float("inf")
+            for c in chosen:
+                dmin = min(dmin, map_distance_m(pt, np.array(POS_DICT[c])))
+            if dmin > best_d:
+                best_d = dmin; best = nid
+        if best is not None:
+            chosen.append(best)
+        else:
+            break
+
+    RESPONDERS = set(chosen)
+    return True
+
+# --------- Paths/collectors/QC ----------
+def _min_hazard_distance_at_xy(xy):
+    if not HAZARDS:
+        return float("inf")
+    _, d_m = _nearest_hazard_m(np.array([xy[0], xy[1]], dtype=float))
+    return float(d_m)
+
+def _node_xy(nid):
+    x, y = POS_DICT[nid]
+    return np.array([x, y], dtype=float)
+
+def _path_length_m_along_nodes(path_nodes):
+    if not path_nodes or len(path_nodes) < 2:
+        return 0.0
+    d = 0.0
+    for a, b in zip(path_nodes[:-1], path_nodes[1:]):
+        d += map_distance_m(_node_xy(a), _node_xy(b))
+    return d
+
+def _evacuee_current_path_nodes(p):
+    path = p.get("path", [])
+    k = int(p.get("path_idx", 0))
+    if not path or k >= len(path) - 1:
+        return path[-1:]
+    return path[k:]
+
+def _collect_paths_polylines(evac_only=True, max_agents=300):
+    xs, ys = [], []
+    drawn = 0
+    tnow = float(tick.value)
+    for p in PEOPLE:
+        affected = _is_person_expected_affected(p["pos"], tnow)
+        if evac_only and not affected:
+            continue
+        nodes = _evacuee_current_path_nodes(p)
+        if len(nodes) < 2:
+            continue
+        for a, b in zip(nodes[:-1], nodes[1:]):
+            xa, ya = POS_DICT[a]; xb, yb = POS_DICT[b]
+            xs += [xa, xb, None]; ys += [ya, yb, None]
+        drawn += 1
+        if drawn >= max_agents:
+            break
+    return xs, ys
+
+def _totals_now():
+    tnow = float(tick.value)
+    total = len(PEOPLE)
+    evacuees_now = sum(1 for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow))
+    aware_now = sum(1 for p in PEOPLE if p.get("aware", False))
+    reached_now = sum(1 for p in PEOPLE if p.get("reached", False))
+    return dict(total=total, evacuees=evacuees_now, aware=aware_now, reached=reached_now)
+
+def qc_run(expected_margin_m=25.0):
+    summaries = []
+    issues = []
+    rows = []
+
+    safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not safe_pool:
+        issues.append("No safe zones computed or placed yet.")
+    else:
+        safe_dists = []
+        for nid in safe_pool:
+            xy = _node_xy(nid)
+            dmin = _min_hazard_distance_at_xy(xy)
+            safe_dists.append(dmin)
+        if safe_dists:
+            summaries.append(f"Safe zones: {len(safe_pool)} | min dist to hazard: {min(safe_dists):.1f} m | median: {np.median(safe_dists):.1f} m")
+            suspicious = sum(1 for dmin in safe_dists if dmin < expected_margin_m)
+            if suspicious > 0:
+                issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre.")
+
+    tnow = float(tick.value)
+    tot = _totals_now()
+    evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
+    summaries.append(f"People now: total={tot['total']} | in-envelope={tot['evacuees']} | aware={tot['aware']} | reached={tot['reached']}")
+
+    no_path = 0
+    total_len_m = []
+    load_per_safe = {}
+    for p in evacuees:
+        nodes = _evacuee_current_path_nodes(p)
+        if len(nodes) < 2:
+            no_path += 1
+            continue
+        plen = _path_length_m_along_nodes(nodes)
+        total_len_m.append(plen)
+        dst = nodes[-1]
+        load_per_safe[dst] = load_per_safe.get(dst, 0) + 1
+        rows.append({
+            "x": float(p["pos"][0]),
+            "y": float(p["pos"][1]),
+            "affected": True,
+            "aware": bool(p.get("aware", False)),
+            "path_nodes": len(nodes),
+            "path_len_m": float(plen),
+            "dest_safe_node": str(dst),
+        })
+
+    if no_path > 0:
+        issues.append(f"{no_path} evacuee(s) currently have no valid path to a safe zone.")
+    if total_len_m:
+        summaries.append(f"Path length (m) — avg: {np.mean(total_len_m):.1f} | P90: {np.percentile(total_len_m,90):.1f} | max: {np.max(total_len_m):.1f}")
+    if load_per_safe:
+        top = sorted(load_per_safe.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        summaries.append("Top safe-node loads: " + ", ".join([f"{nid}:{cnt}" for nid,cnt in top]))
+
+    still_but_marked = 0
+    for p in PEOPLE:
+        if not _is_person_expected_affected(p["pos"], tnow) and (np.linalg.norm(p.get("dir", np.zeros(2))) > 1e-6):
+            still_but_marked += 1
+        if not _is_person_expected_affected(p["pos"], tnow):
+            rows.append({
+                "x": float(p["pos"][0]),
+                "y": float(p["pos"][1]),
+                "affected": False,
+                "aware": bool(p.get("aware", False)),
+                "path_nodes": 0,
+                "path_len_m": 0.0,
+                "dest_safe_node": "",
+            })
+    if still_but_marked > 0:
+        issues.append(f"{still_but_marked} non-affected person(s) appear to be moving (dir≠0).")
+
+    if not issues:
+        issues.append("No issues detected.")
+
+    return summaries, issues, rows
+
+# -------------------- UI --------------------
+@sl.component
+def Controls():
+    # ---------- local states for ALL editable textboxes ----------
+    qc_margin_s, set_qc_margin_s = sl.use_state(f"{float(qc_km_margin.value):.1f}")
+    incident_where_s, set_incident_where_s = sl.use_state("")
+    remove_id_s, set_remove_id_s = sl.use_state("")
+    safe_phrase_s, set_safe_phrase_s = sl.use_state("")
+    people_s, set_people_s = sl.use_state(str(int(num_people.value)))
+    cyclists_s, set_cyclists_s = sl.use_state(str(int(pct_cyclists.value)))
+    hz_radius_s, set_hz_radius_s = sl.use_state(f"{float(hazard_radius.value):.1f}")
+    hz_spread_s, set_hz_spread_s = sl.use_state(f"{float(hazard_spread.value):.2f}")
+    exp_growth_s, set_exp_growth_s = sl.use_state(f"{float(expected_growth_m.value):.2f}")
+    exp_buffer_s, set_exp_buffer_s = sl.use_state(f"{float(expected_buffer_m.value):.1f}")
+    wind_deg_s, set_wind_deg_s = sl.use_state(f"{float(wind_deg.value):.1f}")
+    wind_speed_s, set_wind_speed_s = sl.use_state(f"{float(wind_speed.value):.2f}")
+    base_aw_s, set_base_aw_s = sl.use_state(f"{float(base_awareness_lag.value):.1f}")
+    plume_show_s, set_plume_show_s = sl.use_state("true" if plume_show.value else "false")
+    plume_stab_s, set_plume_stab_s = sl.use_state(plume_stab.value)
+    plume_Q_s, set_plume_Q_s = sl.use_state(f"{float(plume_Q_gs.value):.1f}")
+    plume_H_s, set_plume_H_s = sl.use_state(f"{float(plume_H_m.value):.1f}")
+    plume_range_s, set_plume_range_s = sl.use_state(f"{float(plume_range_m.value):.1f}")
+    plume_grid_s, set_plume_grid_s = sl.use_state(str(int(plume_grid.value)))
+    risk_show_s, set_risk_show_s = sl.use_state("true" if risk_show.value else "false")
+    risk_grid_s, set_risk_grid_s = sl.use_state(str(int(risk_grid.value)))
+    risk_speed_s, set_risk_speed_s = sl.use_state(f"{float(risk_speed_mps.value):.2f}")
+    responders_s, set_responders_s = sl.use_state(str(int(N_RESPONDERS.value)))
+    metrics_text, set_metrics_text = sl.use_state("")
+
+    # ---------- sim controls ----------
+    def on_step(): _step_once()
+    async def loop_runner():
+        while running.value:
+            _step_once()
+            await asyncio.sleep(0.05)
+    def on_toggle():
+        if not running.value:
+            running.value = True
+            asyncio.get_event_loop().create_task(loop_runner())
+        else:
+            running.value = False
+    if not _runtime_loop_started.value:
+        _runtime_loop_started.value = True
+        asyncio.get_event_loop().create_task(_runtime_info_loop())
+
+    # ---------- APPLY / QC handlers ----------
+    def on_apply_parameters():
+        prev_people = int(num_people.value)
+        prev_pct_cyclists = int(pct_cyclists.value)
+        try: num_people.value = max(0, int((people_s or "").strip()))
+        except: pass
+        try: pct_cyclists.value = max(0, min(100, int((cyclists_s or "").strip())))
+        except: pass
+        try: hazard_radius.value = max(0.0, float((hz_radius_s or '').strip()))
+        except: pass
+        try: hazard_spread.value = max(0.0, float((hz_spread_s or '').strip()))
+        except: pass
+        try: expected_growth_m.value = max(0.0, float((exp_growth_s or '').strip()))
+        except: pass
+        try: expected_buffer_m.value = max(0.0, float((exp_buffer_s or '').strip()))
+        except: pass
+        try: wind_deg.value = float((wind_deg_s or '').strip()) % 360.0
+        except: pass
+        try: wind_speed.value = max(0.0, float((wind_speed_s or '').strip()))
+        except: pass
+        try: base_awareness_lag.value = max(0.0, float((base_aw_s or '').strip()))
+        except: pass
+        try:
+            s = (plume_show_s or "").strip().lower()
+            plume_show.value = s in ("1","true","yes","y","on")
+        except: pass
+        try:
+            s = (plume_stab_s or "").strip().upper()
+            if s in ("A","B","C","D","E","F"):
+                plume_stab.value = s
+        except: pass
+        try: plume_Q_gs.value = max(0.0, float((plume_Q_s or '').strip()))
+        except: pass
+        try: plume_H_m.value = max(0.0, float((plume_H_s or '').strip()))
+        except: pass
+        try: plume_range_m.value = max(0.0, float((plume_range_s or '').strip()))
+        except: pass
+        try: plume_grid.value = max(1, int((plume_grid_s or '').strip()))
+        except: pass
+        try:
+            s = (risk_show_s or "").strip().lower()
+            risk_show.value = s in ("1","true","yes","y","on")
+        except: pass
+        try: risk_grid.value = max(1, int((risk_grid_s or '').strip()))
+        except: pass
+        try: risk_speed_mps.value = max(0.1, float((risk_speed_s or '').strip()))
+        except: pass
+        try:
+            N_RESPONDERS.value = max(0, int((responders_s or '').strip()))
+        except:
+            pass
+
+        need_respawn = (int(num_people.value) != prev_people) or (int(pct_cyclists.value) != prev_pct_cyclists)
+        if need_respawn:
+            reset_model()
+        else:
+            _recompute_safe_nodes()
+            _recompute_featured_safe()
+            _choose_targets_and_paths()
+            tick.value += 1
+        _notify("Parameters applied.")
+
+    def on_qc_margin_submit():
+        try:
+            qc_km_margin.value = max(0.0, float((qc_margin_s or '').strip()))
+            _notify("QC margin updated.")
+        except:
+            _notify("Enter a numeric QC margin (m).")
+
+    # --- QC panel ---
+    def on_qc_run():
+        summaries, problems, rows = qc_run(expected_margin_m=float(qc_km_margin.value))
+        qc_summary.value = "\n".join([f"- {s}" for s in summaries])
+        qc_issues.value  = "\n".join([f"- {p}" for p in problems])
+        qc_rows_cache.clear()
+        qc_rows_cache.extend(rows)
+        tick.value += 1
+
+    def on_export_csv():
+        if not qc_rows_cache:
+            _notify("Run QC first; nothing to export.")
+            return
+        df = pd.DataFrame(qc_rows_cache)
+        path = "/mnt/data/qc_routes.csv"
+        try:
+            df.to_csv(path, index=False)
+            download_link_md.value = f"[Download QC CSV](sandbox:{path})"
+            _notify("QC CSV exported.")
+        except Exception as e:
+            _notify(f"Export failed: {e}")
+
+    # --- Hazard controls ---
+    def on_reset():
+        running.value = False
+        reset_model()
+
+    def on_clear_hazards():
+        HAZARDS.clear()
+        _recompute_safe_nodes()
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+        tick.value += 1
+        _notify("Hazards cleared.")
+
+    def on_submit_location():
+        txt = (incident_where_s or "").strip()
+        pt = _point_from_phrase(txt)
+        if pt is None:
+            _notify("Could not parse location. Try: North, South, East, West, North West, NE, Center")
+            return
+        global HAZARD_ID
+        HAZARDS.append({
+            "id": HAZARD_ID,
+            "pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
+            "r_m": float(max(5.0, hazard_radius.value)),
+        })
+        HAZARD_ID += 1
+
+        _recompute_safe_nodes()
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+
+        EVAC_NOTIFICATION_TICK.value = int(tick.value)
+        for p in PEOPLE:
+            p["evac_start_tick"] = int(tick.value)
+            p["evac_end_tick"] = None
+            p["evac_time_s"] = None
+
+        _force_evacuation_mode()
+        tick.value += 1
+        _notify("Hazard added — all agents evacuating now.")
+
+    def on_remove_by_id():
+        txt = (remove_id_s or "").strip()
+        if not txt.isdigit():
+            _notify("Enter a numeric hazard ID."); return
+        hid = int(txt)
+        ok = False
+        for i in range(len(HAZARDS)-1, -1, -1):
+            if int(HAZARDS[i]["id"]) == hid:
+                HAZARDS.pop(i); ok = True; break
+        if ok:
+            _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+            _notify(f"Hazard {hid} removed.")
+        else:
+            _notify(f"Hazard {hid} not found.")
+
+    def on_remove_last():
+        if not HAZARDS:
+            _notify("No hazards to remove."); return
+        hid = int(HAZARDS[-1]["id"])
+        HAZARDS.pop()
+        _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+        _notify(f"Last hazard {hid} removed.")
+
+    # --- Metrics & Optimisers ---
+    def on_eval_effectiveness():
+        set_metrics_text(evaluate_safe_zone_effectiveness())
+
+    def on_export_metrics():
+        rows, summary = metrics_collect()
+        df = pd.DataFrame(rows)
+        path = "/mnt/data/agent_evac_times.csv"
+        try:
+            df.to_csv(path, index=False)
+            _notify("Exported per-agent metrics to CSV.")
+            set_metrics_text(
+                evaluate_safe_zone_effectiveness() + f"\n[Download per-agent CSV](sandbox:{path})"
+            )
+        except Exception as e:
+            _notify(f"Export failed: {e}")
+
+    def on_optimize_min_eta():
+        ok = _optimize_safe_zones_by_eta(
+            k=N_SAFE, attempts=10, speed_mps=float(risk_speed_mps.value), sample_size=500
+        )
+        _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+        _notify("Optimized safe zones (min-ETA)." if ok else "Optimization failed; kept previous safe zones.")
+
+    # --- SCDF responders ---
+    def on_suggest_responders():
+        try:
+            k = max(0, int((responders_s or "0").strip()))
+        except:
+            k = int(N_RESPONDERS.value)
+        ok = _suggest_responders(k=k)
+        tick.value += 1
+        _notify("Suggested SCDF responder staging points." if ok else "Responder suggestion failed.")
+
+    def on_clear_responders():
+        RESPONDERS.clear()
+        tick.value += 1
+        _notify("Cleared SCDF responder staging points.")
+
+    # ---------- Render Controls ----------
+    sl.Markdown("### Quality Check")
+    with sl.Row():
+        sl.InputText("Flag safe-zone if within X m of a hazard",
+                     value=qc_margin_s, on_value=set_qc_margin_s,
+                     continuous_update=True, placeholder="e.g., 25")
+        sl.Button("Apply QC Margin", on_click=on_qc_margin_submit)
+        sl.Checkbox(label="Show evac paths overlay", value=qc_show_paths)
+
+    with sl.Row():
+        sl.Button("Run QC", on_click=on_qc_run)
+        sl.Button("Export QC CSV", on_click=on_export_csv)
+
+    if qc_summary.value:
+        sl.Markdown("**QC Summary**")
+        sl.Markdown(qc_summary.value)
+    if qc_issues.value:
+        sl.Markdown("**QC Issues**")
+        sl.Markdown(qc_issues.value)
+    if download_link_md.value:
+        sl.Markdown(download_link_md.value)
+    if ui_message.value:
+        sl.Markdown(f"> **{ui_message.value}**")
+
+    sl.Markdown("### Controls")
+    with sl.Row():
+        sl.Button("STEP", on_click=on_step)
+        sl.Button("START" if not running.value else "PAUSE", on_click=on_toggle)
+        sl.Button("RESET", on_click=on_reset)
+        sl.Markdown(f"**Tick:** {int(tick.value)}")
+
+    with sl.Row():
+        sl.Markdown(f"**Local time:** {time_str.value or '-'}")
+        sl.Markdown(f"**Date:** {date_str.value or '-'}")
+        sl.Markdown(f"**Weather:** {weather_str.value or '—'}")
+
+    sl.Markdown("**Incidents (Hazards):** Add multiple or remove by ID")
+    with sl.Row():
+        sl.InputText(
+            label="Where is it:",
+            value=incident_where_s, on_value=set_incident_where_s,
+            continuous_update=True,
+            placeholder="e.g., North  |  NE  |  160°  |  North, 160 degrees  |  225°, 300m"
+        )
+        sl.Button("Submit", on_click=on_submit_location)
+        sl.Button("Clear Hazards", on_click=on_clear_hazards)
+    with sl.Row():
+        sl.InputText(label="Remove Hazard ID",
+                     value=remove_id_s, on_value=set_remove_id_s,
+                     continuous_update=True, placeholder="e.g., 2")
+        sl.Button("Remove by ID", on_click=on_remove_by_id)
+        sl.Button("Remove Last", on_click=on_remove_last)
+
+    if HAZARDS:
+        sl.Markdown("**Current Hazards**")
+        for h in list(HAZARDS):
+            hid = int(h["id"])
+            rdisp = float(h.get("r_m", 0.0))
+            with sl.Row():
+                sl.Markdown(f"- ID **{hid}** | radius ~ {rdisp:.1f} m")
+                def _mk_remove(hid_):
+                    def _inner():
+                        ok = False
+                        for i in range(len(HAZARDS)-1, -1, -1):
+                            if int(HAZARDS[i]["id"]) == int(hid_):
+                                HAZARDS.pop(i); ok = True; break
+                        if ok:
+                            _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+                            _notify(f"Hazard {hid_} removed.")
+                        else:
+                            _notify(f"Hazard {hid_} not found.")
+                    return _inner
+                sl.Button("Remove", on_click=_mk_remove(hid))
+
+    sl.Markdown("### Scenario Parameters (consolidated)")
+    with sl.Column():
+        with sl.Row():
+            sl.InputText("People (initial)", value=people_s, on_value=set_people_s, continuous_update=True, placeholder="e.g., 200")
+            sl.InputText("Cyclists (%)", value=cyclists_s, on_value=set_cyclists_s, continuous_update=True, placeholder="0-100")
+        with sl.Row():
+            sl.InputText("Hazard radius (new, m)", value=hz_radius_s, on_value=set_hz_radius_s, continuous_update=True, placeholder="e.g., 40.0")
+            sl.InputText("Radius spread / step (m/step)", value=hz_spread_s, on_value=set_hz_spread_s, continuous_update=True, placeholder="e.g., 1.2")
+        with sl.Row():
+            sl.InputText("Expected growth (m/step)", value=exp_growth_s, on_value=set_exp_growth_s, continuous_update=True, placeholder="e.g., 3.0")
+            sl.InputText("Expected safety buffer (m)", value=exp_buffer_s, on_value=set_exp_buffer_s, continuous_update=True, placeholder="e.g., 0.0")
+        with sl.Row():
+            sl.InputText("Wind (deg)", value=wind_deg_s, on_value=set_wind_deg_s, continuous_update=True, placeholder="0-360")
+            sl.InputText("Wind speed (m/s)", value=wind_speed_s, on_value=set_wind_speed_s, continuous_update=True, placeholder="e.g., 1.0")
+        with sl.Row():
+            sl.InputText("Base awareness lag (s)", value=base_aw_s, on_value=set_base_aw_s, continuous_update=True, placeholder="e.g., 8.0")
+            sl.InputText("Show plume (true/false)", value=plume_show_s, on_value=set_plume_show_s, continuous_update=True, placeholder="true/false")
+        with sl.Row():
+            sl.InputText("Stability (A–F)", value=plume_stab_s, on_value=set_plume_stab_s, continuous_update=True, placeholder="A..F")
+            sl.InputText("Q (g/s)", value=plume_Q_s, on_value=set_plume_Q_s, continuous_update=True, placeholder="e.g., 100")
+        with sl.Row():
+            sl.InputText("Stack height H (m)", value=plume_H_s, on_value=set_plume_H_s, continuous_update=True, placeholder="e.g., 20")
+            sl.InputText("Plume range (m)", value=plume_range_s, on_value=set_plume_range_s, continuous_update=True, placeholder="e.g., 1500")
+        with sl.Row():
+            sl.InputText("Heatmap resolution (rows)", value=plume_grid_s, on_value=set_plume_grid_s, continuous_update=True, placeholder="e.g., 90")
+            sl.InputText("Show risk heatmap (true/false)", value=risk_show_s, on_value=set_risk_show_s, continuous_update=True, placeholder="true/false")
+        with sl.Row():
+            sl.InputText("Risk grid rows", value=risk_grid_s, on_value=set_risk_grid_s, continuous_update=True, placeholder="e.g., 90")
+            sl.InputText("Risk walking speed (m/s)", value=risk_speed_s, on_value=set_risk_speed_s, continuous_update=True, placeholder="e.g., 1.4")
+        with sl.Row():
+            sl.InputText("SCDF responders (count)", value=responders_s, on_value=set_responders_s, continuous_update=True, placeholder="e.g., 5")
+            sl.Button("Apply Parameters", on_click=on_apply_parameters)
+
+    sl.Markdown("**Evacuation Metrics & Optimization**")
+    with sl.Row():
+        sl.Button("Evaluate Effectiveness", on_click=on_eval_effectiveness)
+        sl.Button("Export Metrics CSV", on_click=on_export_metrics)
+        sl.Button("Suggest (min-ETA) Safe Zones", on_click=on_optimize_min_eta)
+
+    if metrics_text:
+        sl.Markdown(metrics_text)
+
+    sl.Markdown("**Safe Zones — manual & distance-optimize**")
+    with sl.Row():
+        sl.InputText(label="Add Safe Zone (phrase)",
+                     value=safe_phrase_s, on_value=set_safe_phrase_s,
+                     continuous_update=True, placeholder="North East")
+        def on_add_safe():
+            txt = (safe_phrase_s or "").strip()
+            if not txt:
+                _notify("Enter a phrase like 'North West', 'Center', 'SE'."); return
+            pt = _point_from_phrase(txt)
+            if pt is None:
+                _notify("Could not parse phrase; try: North, South, East, West, NE, NW, SE, SW, Center."); return
+            _, node_id = _nearest_node_idx(pt[0], pt[1])
+            MANUAL_SAFE.add(node_id)
+            _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+            _notify("Manual safe zone added.")
+        def on_clear_safe():
+            MANUAL_SAFE.clear(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+            _notify("Manual safe zones cleared.")
+        def on_optimize_dist():
+            _suggest_optimized_safe(k=N_SAFE); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+            _notify("Optimized safe zones (distance-based) suggested.")
+        sl.Button("Add Safe Zone Here", on_click=on_add_safe)
+        sl.Button("Clear Safe Zones", on_click=on_clear_safe)
+        sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize_dist)
+
+    sl.Markdown("**SCDF Responder Deployment**")
+    with sl.Row():
+        sl.Button("Suggest SCDF Responder Staging", on_click=on_suggest_responders)
+        sl.Button("Clear SCDF Responders", on_click=on_clear_responders)
+
+    if last_error.value:
+        sl.Markdown(f"**Render error:** {last_error.value}")
 
 def park_chart():
     last_error.value = ""
@@ -912,6 +1557,18 @@ def park_chart():
             visible=True if (px and py) else False
         ))
 
+        # SCDF responders (blue stars)
+        rx_, ry_ = [], []
+        for nid in RESPONDERS:
+            x, y = POS_DICT[nid]
+            rx_.append(x); ry_.append(y)
+        fig.add_trace(go.Scatter(
+            x=rx_, y=ry_, mode="markers",
+            marker=dict(size=16, symbol="star", color="blue", line=dict(width=1, color="white")),
+            name="SCDF responders", hoverinfo="skip", showlegend=True,
+            visible=True if rx_ else False
+        ))
+
         fig.update_layout(
             shapes=shapes,
             xaxis=dict(range=x_domain, showgrid=True, zeroline=False),
@@ -934,617 +1591,14 @@ def park_chart():
             title="Chart failed to render — see 'Render error' text above.",
         ))
 
-def _min_hazard_distance_at_xy(xy):
-    if not HAZARDS:
-        return float("inf")
-    _, d_m = _nearest_hazard_m(np.array([xy[0], xy[1]], dtype=float))
-    return float(d_m)
-
-def _node_xy(nid):
-    x, y = POS_DICT[nid]
-    return np.array([x, y], dtype=float)
-
-def _path_length_m_along_nodes(path_nodes):
-    if not path_nodes or len(path_nodes) < 2:
-        return 0.0
-    d = 0.0
-    for a, b in zip(path_nodes[:-1], path_nodes[1:]):
-        d += map_distance_m(_node_xy(a), _node_xy(b))
-    return d
-
-def _evacuee_current_path_nodes(p):
-    path = p.get("path", [])
-    k = int(p.get("path_idx", 0))
-    if not path or k >= len(path) - 1:
-        return path[-1:]
-    return path[k:]
-
-def _collect_paths_polylines(evac_only=True, max_agents=300):
-    xs, ys = [], []
-    drawn = 0
-    tnow = float(tick.value)
-    for p in PEOPLE:
-        affected = _is_person_expected_affected(p["pos"], tnow)
-        if evac_only and not affected:
-            continue
-        nodes = _evacuee_current_path_nodes(p)
-        if len(nodes) < 2:
-            continue
-        for a, b in zip(nodes[:-1], nodes[1:]):
-            xa, ya = POS_DICT[a]; xb, yb = POS_DICT[b]
-            xs += [xa, xb, None]; ys += [ya, yb, None]
-        drawn += 1
-        if drawn >= max_agents:
-            break
-    return xs, ys
-
-def _totals_now():
-    """Unified counts used by QC and Effectiveness."""
-    tnow = float(tick.value)
-    total = len(PEOPLE)
-    evacuees_now = sum(1 for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow))
-    aware_now = sum(1 for p in PEOPLE if p.get("aware", False))
-    reached_now = sum(1 for p in PEOPLE if p.get("reached", False))
-    return dict(total=total, evacuees=evacuees_now, aware=aware_now, reached=reached_now)
-
-def qc_run(expected_margin_m=25.0):
-    summaries = []
-    issues = []
-    rows = []
-
-    safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
-    if not safe_pool:
-        issues.append("No safe zones computed or placed yet.")
-    else:
-        safe_dists = []
-        for nid in safe_pool:
-            xy = _node_xy(nid)
-            dmin = _min_hazard_distance_at_xy(xy)
-            safe_dists.append(dmin)
-        if safe_dists:
-            summaries.append(f"Safe zones: {len(safe_pool)} | min dist to hazard: {min(safe_dists):.1f} m | median: {np.median(safe_dists):.1f} m")
-            suspicious = sum(1 for dmin in safe_dists if dmin < expected_margin_m)
-            if suspicious > 0:
-                issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre.")
-
-    tnow = float(tick.value)
-    tot = _totals_now()
-    evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
-    summaries.append(f"People now: total={tot['total']} | in-envelope={tot['evacuees']} | aware={tot['aware']} | reached={tot['reached']}")
-
-    no_path = 0
-    total_len_m = []
-    load_per_safe = {}
-    for p in evacuees:
-        nodes = _evacuee_current_path_nodes(p)
-        if len(nodes) < 2:
-            no_path += 1
-            continue
-        plen = _path_length_m_along_nodes(nodes)
-        total_len_m.append(plen)
-        dst = nodes[-1]
-        load_per_safe[dst] = load_per_safe.get(dst, 0) + 1
-        rows.append({
-            "x": float(p["pos"][0]),
-            "y": float(p["pos"][1]),
-            "affected": True,
-            "aware": bool(p.get("aware", False)),
-            "path_nodes": len(nodes),
-            "path_len_m": float(plen),
-            "dest_safe_node": str(dst),
-        })
-
-    if no_path > 0:
-        issues.append(f"{no_path} evacuee(s) currently have no valid path to a safe zone.")
-    if total_len_m:
-        summaries.append(f"Path length (m) — avg: {np.mean(total_len_m):.1f} | P90: {np.percentile(total_len_m,90):.1f} | max: {np.max(total_len_m):.1f}")
-    if load_per_safe:
-        top = sorted(load_per_safe.items(), key=lambda kv: kv[1], reverse=True)[:5]
-        summaries.append("Top safe-node loads: " + ", ".join([f"{nid}:{cnt}" for nid,cnt in top]))
-
-    still_but_marked = 0
-    for p in PEOPLE:
-        if not _is_person_expected_affected(p["pos"], tnow) and (np.linalg.norm(p.get("dir", np.zeros(2))) > 1e-6):
-            still_but_marked += 1
-        if not _is_person_expected_affected(p["pos"], tnow):
-            rows.append({
-                "x": float(p["pos"][0]),
-                "y": float(p["pos"][1]),
-                "affected": False,
-                "aware": bool(p.get("aware", False)),
-                "path_nodes": 0,
-                "path_len_m": 0.0,
-                "dest_safe_node": "",
-            })
-    if still_but_marked > 0:
-        issues.append(f"{still_but_marked} non-affected person(s) appear to be moving (dir≠0).")
-
-    if not issues:
-        issues.append("No issues detected.")
-
-    return summaries, issues, rows
-
-# --- Loading of exporting CSVs ---
-
-def _load_hazards_from_df(df):
-    """Accepts columns: x,y[,r_m,id]. x/y are in map coords (same as POS_DICT)."""
-    global HAZARDS, HAZARD_ID
-    required = {"x", "y"}
-    if not required.issubset(set(c.lower() for c in df.columns)):
-        raise ValueError("Hazards CSV must have columns: x, y (, r_m optional).")
-    HAZARDS.clear()
-    for _, row in df.iterrows():
-        x = float(row[[c for c in df.columns if c.lower()=="x"][0]])
-        y = float(row[[c for c in df.columns if c.lower()=="y"][0]])
-        r = float(row[[c for c in df.columns if c.lower()=="r_m"][0]]) if any(c.lower()=="r_m" for c in df.columns) else float(hazard_radius.value)
-        HAZARDS.append({"id": HAZARD_ID, "pos": np.array([x, y], dtype=float), "r_m": max(5.0, r)})
-        HAZARD_ID += 1
-    _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths()
-
-def _load_manual_safe_from_df(df):
-    """Accepts either node_id column OR x,y columns (we snap x,y to nearest node)."""
-    global MANUAL_SAFE
-    cols = set(c.lower() for c in df.columns)
-    if "node_id" in cols:
-        MANUAL_SAFE = set(df["node_id"].astype(str).tolist())
-    elif {"x","y"}.issubset(cols):
-        new_safe = set()
-        for _, row in df.iterrows():
-            x = float(row[[c for c in df.columns if c.lower()=="x"][0]])
-            y = float(row[[c for c in df.columns if c.lower()=="y"][0]])
-            _, node_id = _nearest_node_idx(x, y)
-            new_safe.add(node_id)
-        MANUAL_SAFE = new_safe
-    else:
-        raise ValueError("Safe zones CSV must have node_id OR (x,y) columns.")
-    _recompute_featured_safe(); _choose_targets_and_paths()
-
-
-# -------------------- UI --------------------
-@sl.component
-def Controls():
-    # ---------- local states for ALL editable textboxes ----------
-    # QC margin
-    qc_margin_s, set_qc_margin_s = sl.use_state(f"{float(qc_km_margin.value):.1f}")
-    # Incident add
-    incident_where_s, set_incident_where_s = sl.use_state("")
-    # Remove hazard by ID
-    remove_id_s, set_remove_id_s = sl.use_state("")
-    # Safe-zone phrase
-    safe_phrase_s, set_safe_phrase_s = sl.use_state("")
-    # Consolidated parameters
-    people_s, set_people_s = sl.use_state(str(int(num_people.value)))
-    cyclists_s, set_cyclists_s = sl.use_state(str(int(pct_cyclists.value)))
-    hz_radius_s, set_hz_radius_s = sl.use_state(f"{float(hazard_radius.value):.1f}")
-    hz_spread_s, set_hz_spread_s = sl.use_state(f"{float(hazard_spread.value):.2f}")
-    exp_growth_s, set_exp_growth_s = sl.use_state(f"{float(expected_growth_m.value):.2f}")
-    exp_buffer_s, set_exp_buffer_s = sl.use_state(f"{float(expected_buffer_m.value):.1f}")
-    wind_deg_s, set_wind_deg_s = sl.use_state(f"{float(wind_deg.value):.1f}")
-    wind_speed_s, set_wind_speed_s = sl.use_state(f"{float(wind_speed.value):.2f}")
-    base_aw_s, set_base_aw_s = sl.use_state(f"{float(base_awareness_lag.value):.1f}")
-    plume_show_s, set_plume_show_s = sl.use_state("true" if plume_show.value else "false")
-    plume_stab_s, set_plume_stab_s = sl.use_state(plume_stab.value)
-    plume_Q_s, set_plume_Q_s = sl.use_state(f"{float(plume_Q_gs.value):.1f}")
-    plume_H_s, set_plume_H_s = sl.use_state(f"{float(plume_H_m.value):.1f}")
-    plume_range_s, set_plume_range_s = sl.use_state(f"{float(plume_range_m.value):.1f}")
-    plume_grid_s, set_plume_grid_s = sl.use_state(str(int(plume_grid.value)))
-    risk_show_s, set_risk_show_s = sl.use_state("true" if risk_show.value else "false")
-    risk_grid_s, set_risk_grid_s = sl.use_state(str(int(risk_grid.value)))
-    risk_speed_s, set_risk_speed_s = sl.use_state(f"{float(risk_speed_mps.value):.2f}")
-    
-    # Metrics UI state (use_state so UI updates reliably)
-    metrics_text, set_metrics_text = sl.use_state("")
-
-    # --- CSV Import (Hazards / Safe Zones) ---
-    uploaded_haz_csv, set_uploaded_haz_csv = sl.use_state(None)
-    uploaded_safe_csv, set_uploaded_safe_csv = sl.use_state(None)
-
-    def on_import_hazards():
-        if not uploaded_haz_csv or "path" not in uploaded_haz_csv:
-            _notify("Choose a hazards CSV first."); return
-        try:
-            df = pd.read_csv(uploaded_haz_csv["path"])
-            _load_hazards_from_df(df)
-            # Reset timing since this usually means a new incident set
-            EVAC_NOTIFICATION_TICK.value = int(tick.value)
-            for p in PEOPLE:
-                p["evac_start_tick"] = int(tick.value)
-                p["evac_end_tick"] = None
-                p["evac_time_s"] = None
-            _force_evacuation_mode()
-            tick.value += 1
-            _notify("Imported hazards from CSV.")
-        except Exception as e:
-            _notify(f"Import hazards failed: {e}")
-
-    def on_import_safezones():
-        if not uploaded_safe_csv or "path" not in uploaded_safe_csv:
-            _notify("Choose a safe-zones CSV first."); return
-        try:
-            df = pd.read_csv(uploaded_safe_csv["path"])
-            _load_manual_safe_from_df(df)
-            _notify("Imported manual safe zones from CSV.")
-            tick.value += 1
-        except Exception as e:
-            _notify(f"Import safe zones failed: {e}")
-
-
-    # ---------- sim controls ----------
-    def on_step(): _step_once()
-
-    async def loop_runner():
-        while running.value:
-            _step_once()
-            await asyncio.sleep(0.05)
-
-    def on_toggle():
-        if not running.value:
-            running.value = True
-            asyncio.get_event_loop().create_task(loop_runner())
-        else:
-            running.value = False
-
-    if not _runtime_loop_started.value:
-        _runtime_loop_started.value = True
-        asyncio.get_event_loop().create_task(_runtime_info_loop())
-
-    # ---------- APPLY / QC handlers (read from local states ONLY) ----------
-    def on_apply_parameters():
-        prev_people = int(num_people.value)
-        prev_pct_cyclists = int(pct_cyclists.value)
-        try:
-            num_people.value = max(0, int((people_s or "").strip()))
-        except: pass
-        try:
-            pct_cyclists.value = max(0, min(100, int((cyclists_s or "").strip())))
-        except: pass
-        try: hazard_radius.value = max(0.0, float((hz_radius_s or '').strip()))
-        except: pass
-        try: hazard_spread.value = max(0.0, float((hz_spread_s or '').strip()))
-        except: pass
-        try: expected_growth_m.value = max(0.0, float((exp_growth_s or '').strip()))
-        except: pass
-        try: expected_buffer_m.value = max(0.0, float((exp_buffer_s or '').strip()))
-        except: pass
-        try: wind_deg.value = float((wind_deg_s or '').strip()) % 360.0
-        except: pass
-        try: wind_speed.value = max(0.0, float((wind_speed_s or '').strip()))
-        except: pass
-        try: base_awareness_lag.value = max(0.0, float((base_aw_s or '').strip()))
-        except: pass
-        try:
-            s = (plume_show_s or "").strip().lower()
-            plume_show.value = s in ("1","true","yes","y","on")
-        except: pass
-        try:
-            s = (plume_stab_s or "").strip().upper()
-            if s in ("A","B","C","D","E","F"):
-                plume_stab.value = s
-        except: pass
-        try: plume_Q_gs.value = max(0.0, float((plume_Q_s or '').strip()))
-        except: pass
-        try: plume_H_m.value = max(0.0, float((plume_H_s or '').strip()))
-        except: pass
-        try: plume_range_m.value = max(0.0, float((plume_range_s or '').strip()))
-        except: pass
-        try: plume_grid.value = max(1, int((plume_grid_s or '').strip()))
-        except: pass
-        try:
-            s = (risk_show_s or "").strip().lower()
-            risk_show.value = s in ("1","true","yes","y","on")
-        except: pass
-        try: risk_grid.value = max(1, int((risk_grid_s or '').strip()))
-        except: pass
-        try: risk_speed_mps.value = max(0.1, float((risk_speed_s or '').strip()))
-        except: pass
-
-            # If population size or cyclist %, respawn to match new inputs
-        need_respawn = (int(num_people.value) != prev_people) or (int(pct_cyclists.value) != prev_pct_cyclists)
-        if need_respawn:
-            reset_model()  # re-spawns PEOPLE using the new settings
-        else:
-            _recompute_safe_nodes()
-            _recompute_featured_safe()
-            _choose_targets_and_paths()
-            tick.value += 1
-
-        _notify("Parameters applied.")
-
-            # If population size or cyclist %, respawn to match new inputs
-        need_respawn = (int(num_people.value) != prev_people) or (int(pct_cyclists.value) != prev_pct_cyclists)
-        if need_respawn:
-            reset_model()  # rebuild PEOPLE
-            # clear QC/metrics text so you don't see stale counts
-            qc_summary.value = ""
-            qc_issues.value = ""
-            if 'set_metrics_text' in locals():
-                set_metrics_text("")
-
-
-    def on_qc_margin_submit():
-        try:
-            qc_km_margin.value = max(0.0, float((qc_margin_s or '').strip()))
-            _notify("QC margin updated.")
-        except:
-            _notify("Enter a numeric QC margin (m).")
-
-    # --- QC panel ---
-    sl.Markdown("### Quality Check")
-    def on_qc_run():
-        summaries, problems, rows = qc_run(expected_margin_m=float(qc_km_margin.value))
-        qc_summary.value = "\n".join([f"- {s}" for s in summaries])
-        qc_issues.value  = "\n".join([f"- {p}" for p in problems])
-        qc_rows_cache.clear()
-        qc_rows_cache.extend(rows)
-        tick.value += 1
-
-    def on_export_csv():
-        if not qc_rows_cache:
-            _notify("Run QC first; nothing to export.")
-            return
-        df = pd.DataFrame(qc_rows_cache)
-        path = "/mnt/data/qc_routes.csv"
-        try:
-            df.to_csv(path, index=False)
-            download_link_md.value = f"[Download QC CSV](sandbox:{path})"
-            _notify("QC CSV exported.")
-        except Exception as e:
-            _notify(f"Export failed: {e}")
-
-    with sl.Row():
-        sl.InputText("Flag safe-zone if within X m of a hazard",
-                     value=qc_margin_s, on_value=set_qc_margin_s,
-                     continuous_update=True, placeholder="e.g., 25")
-        sl.Button("Apply QC Margin", on_click=on_qc_margin_submit)
-        sl.Checkbox(label="Show evac paths overlay", value=qc_show_paths)
-
-    with sl.Row():
-        sl.Button("Run QC", on_click=on_qc_run)
-        sl.Button("Export QC CSV", on_click=on_export_csv)
-
-    if qc_summary.value:
-        sl.Markdown("**QC Summary**")
-        sl.Markdown(qc_summary.value)
-    if qc_issues.value:
-        sl.Markdown("**QC Issues**")
-        sl.Markdown(qc_issues.value)
-    if download_link_md.value:
-        sl.Markdown(download_link_md.value)
-    if ui_message.value:
-        sl.Markdown(f"> **{ui_message.value}**")
-
-    # --- Hazard controls ---
-    def on_reset():
-        running.value = False
-        reset_model()
-
-    def on_clear_hazards():
-        HAZARDS.clear()
-        _recompute_safe_nodes()
-        _recompute_featured_safe()
-        _choose_targets_and_paths()
-        tick.value += 1
-        _notify("Hazards cleared.")
-
-    def on_submit_location():
-        txt = (incident_where_s or "").strip()
-        pt = _point_from_phrase(txt)
-        if pt is None:
-            _notify("Could not parse location. Try: North, South, East, West, North West, NE, Center")
-            return
-        global HAZARD_ID
-        HAZARDS.append({
-            "id": HAZARD_ID,
-            "pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
-            "r_m": float(max(5.0, hazard_radius.value)),
-        })
-        HAZARD_ID += 1
-
-        # Recompute safe nodes, then force everyone into evacuation mode
-        _recompute_safe_nodes()
-        _recompute_featured_safe()
-        _choose_targets_and_paths()
-
-        # NEW: record global notification tick for timing & reset agent timers
-        EVAC_NOTIFICATION_TICK.value = int(tick.value)
-        for p in PEOPLE:
-            p["evac_start_tick"] = int(tick.value)
-            p["evac_end_tick"] = None
-            p["evac_time_s"] = None
-
-        _force_evacuation_mode()
-
-        tick.value += 1
-        _notify("Hazard added — all agents evacuating now.")
-
-    def on_remove_by_id():
-        txt = (remove_id_s or "").strip()
-        if not txt.isdigit():
-            _notify("Enter a numeric hazard ID."); return
-        hid = int(txt)
-        ok = False
-        for i in range(len(HAZARDS)-1, -1, -1):
-            if int(HAZARDS[i]["id"]) == hid:
-                HAZARDS.pop(i); ok = True; break
-        if ok:
-            _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-            _notify(f"Hazard {hid} removed.")
-        else:
-            _notify(f"Hazard {hid} not found.")
-
-    def on_remove_last():
-        if not HAZARDS:
-            _notify("No hazards to remove."); return
-        hid = int(HAZARDS[-1]["id"])
-        HAZARDS.pop()
-        _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-        _notify(f"Last hazard {hid} removed.")
-
-    with sl.Column():
-        sl.Markdown("### Controls")
-        with sl.Row():
-            sl.Button("STEP", on_click=on_step)
-            sl.Button("START" if not running.value else "PAUSE", on_click=on_toggle)
-            sl.Button("RESET", on_click=on_reset)
-            sl.Markdown(f"**Tick:** {int(tick.value)}")
-
-        with sl.Row(gap="10px"):
-            sl.Markdown(f"**Local time:** {time_str.value or '-'}")
-            sl.Markdown(f"**Date:** {date_str.value or '-'}")
-            sl.Markdown(f"**Weather:** {weather_str.value or '—'}")
-
-        sl.Markdown("**Incidents (Hazards):** Add multiple or remove by ID")
-        with sl.Row():
-            sl.InputText(
-                label="Where is it:",
-                value=incident_where_s, on_value=set_incident_where_s,
-                continuous_update=True,
-                placeholder="e.g., North  |  NE  |  160°  |  North, 160 degrees  |  225°, 300m"
-            )
-            sl.Button("Submit", on_click=on_submit_location)
-            sl.Button("Clear Hazards", on_click=on_clear_hazards)
-        with sl.Row():
-            sl.InputText(label="Remove Hazard ID",
-                         value=remove_id_s, on_value=set_remove_id_s,
-                         continuous_update=True, placeholder="e.g., 2")
-            sl.Button("Remove by ID", on_click=on_remove_by_id)
-            sl.Button("Remove Last", on_click=on_remove_last)
-
-        if HAZARDS:
-            sl.Markdown("**Current Hazards**")
-            for h in list(HAZARDS):
-                hid = int(h["id"])
-                rdisp = float(h.get("r_m", 0.0))
-                with sl.Row():
-                    sl.Markdown(f"- ID **{hid}** | radius ~ {rdisp:.1f} m")
-                    def _mk_remove(hid_):
-                        def _inner():
-                            ok = False
-                            for i in range(len(HAZARDS)-1, -1, -1):
-                                if int(HAZARDS[i]["id"]) == int(hid_):
-                                    HAZARDS.pop(i); ok = True; break
-                            if ok:
-                                _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-                                _notify(f"Hazard {hid_} removed.")
-                            else:
-                                _notify(f"Hazard {hid_} not found.")
-                        return _inner
-                    sl.Button("Remove", on_click=_mk_remove(hid))
-
-        sl.Markdown("### Scenario Parameters (consolidated)")
-        with sl.Column():
-            with sl.Row():
-                sl.InputText("People (initial)", value=people_s, on_value=set_people_s, continuous_update=True, placeholder="e.g., 200")
-                sl.InputText("Cyclists (%)", value=cyclists_s, on_value=set_cyclists_s, continuous_update=True, placeholder="0-100")
-            with sl.Row():
-                sl.InputText("Hazard radius (new, m)", value=hz_radius_s, on_value=set_hz_radius_s, continuous_update=True, placeholder="e.g., 40.0")
-                sl.InputText("Radius spread / step (m/step)", value=hz_spread_s, on_value=set_hz_spread_s, continuous_update=True, placeholder="e.g., 1.2")
-            with sl.Row():
-                sl.InputText("Expected growth (m/step)", value=exp_growth_s, on_value=set_exp_growth_s, continuous_update=True, placeholder="e.g., 3.0")
-                sl.InputText("Expected safety buffer (m)", value=exp_buffer_s, on_value=set_exp_buffer_s, continuous_update=True, placeholder="e.g., 0.0")
-            with sl.Row():
-                sl.InputText("Wind (deg)", value=wind_deg_s, on_value=set_wind_deg_s, continuous_update=True, placeholder="0-360")
-                sl.InputText("Wind speed (m/s)", value=wind_speed_s, on_value=set_wind_speed_s, continuous_update=True, placeholder="e.g., 1.0")
-            with sl.Row():
-                sl.InputText("Base awareness lag (s)", value=base_aw_s, on_value=set_base_aw_s, continuous_update=True, placeholder="e.g., 8.0")
-                sl.InputText("Show plume (true/false)", value=plume_show_s, on_value=set_plume_show_s, continuous_update=True, placeholder="true/false")
-            with sl.Row():
-                sl.InputText("Stability (A–F)", value=plume_stab_s, on_value=set_plume_stab_s, continuous_update=True, placeholder="A..F")
-                sl.InputText("Q (g/s)", value=plume_Q_s, on_value=set_plume_Q_s, continuous_update=True, placeholder="e.g., 100")
-            with sl.Row():
-                sl.InputText("Stack height H (m)", value=plume_H_s, on_value=set_plume_H_s, continuous_update=True, placeholder="e.g., 20")
-                sl.InputText("Plume range (m)", value=plume_range_s, on_value=set_plume_range_s, continuous_update=True, placeholder="e.g., 1500")
-            with sl.Row():
-                sl.InputText("Heatmap resolution (rows)", value=plume_grid_s, on_value=set_plume_grid_s, continuous_update=True, placeholder="e.g., 90")
-                sl.InputText("Show risk heatmap (true/false)", value=risk_show_s, on_value=set_risk_show_s, continuous_update=True, placeholder="true/false")
-            with sl.Row():
-                sl.InputText("Risk grid rows", value=risk_grid_s, on_value=set_risk_grid_s, continuous_update=True, placeholder="e.g., 90")
-                sl.InputText("Risk walking speed (m/s)", value=risk_speed_s, on_value=set_risk_speed_s, continuous_update=True, placeholder="e.g., 1.4")
-            with sl.Row():
-                sl.Button("Apply Parameters", on_click=on_apply_parameters)
-
-        # --- Metrics + Optimization controls (separate; does not touch parameter area) ---
-        sl.Markdown("**Evacuation Metrics & Optimization**")
-        def on_eval_effectiveness():
-            set_metrics_text(evaluate_safe_zone_effectiveness())
-
-        def on_export_metrics():
-            rows, summary = metrics_collect()
-            df = pd.DataFrame(rows)
-            path = "/mnt/data/agent_evac_times.csv"
-            try:
-                df.to_csv(path, index=False)
-                _notify("Exported per-agent metrics to CSV.")
-                set_metrics_text(
-                    evaluate_safe_zone_effectiveness() + f"\n[Download per-agent CSV](sandbox:{path})"
-                )
-            except Exception as e:
-                _notify(f"Export failed: {e}")
-
-        def on_optimize_min_eta():
-            ok = _optimize_safe_zones_by_eta(
-                k=N_SAFE, attempts=10, speed_mps=float(risk_speed_mps.value), sample_size=500
-            )
-            _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-            _notify("Optimized safe zones (min-ETA)." if ok else "Optimization failed; kept previous safe zones.")
-
-
-        with sl.Row():
-            sl.Button("Evaluate Effectiveness", on_click=on_eval_effectiveness)
-            sl.Button("Export Metrics CSV", on_click=on_export_metrics)
-            sl.Button("Suggest (min-ETA) Safe Zones", on_click=on_optimize_min_eta)
-
-        if metrics_text:
-            sl.Markdown(metrics_text)
-
-        sl.Markdown("**Safe Zones — manual & distance-optimize**")
-        with sl.Row():
-            sl.InputText(label="Add Safe Zone (phrase)",
-                         value=safe_phrase_s, on_value=set_safe_phrase_s,
-                         continuous_update=True, placeholder="North East")
-            def on_add_safe():
-                txt = (safe_phrase_s or "").strip()
-                if not txt:
-                    _notify("Enter a phrase like 'North West', 'Center', 'SE'."); return
-                pt = _point_from_phrase(txt)
-                if pt is None:
-                    _notify("Could not parse phrase; try: North, South, East, West, NE, NW, SE, SW, Center."); return
-                _, node_id = _nearest_node_idx(pt[0], pt[1])
-                MANUAL_SAFE.add(node_id)
-                _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-                _notify("Manual safe zone added.")
-            def on_clear_safe():
-                MANUAL_SAFE.clear(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-                _notify("Manual safe zones cleared.")
-            def on_optimize_dist():
-                _suggest_optimized_safe(k=N_SAFE); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-                _notify("Optimized safe zones (distance-based) suggested.")
-            sl.Button("Add Safe Zone Here", on_click=on_add_safe)
-            sl.Button("Clear Safe Zones", on_click=on_clear_safe)
-            sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize_dist)
-
-        if last_error.value:
-            sl.Markdown(f"**Render error:** {last_error.value}")
-            
-        sl.Markdown("**CSV Import**")
-
-        with sl.Row():
-            sl.FileDrop(label="Hazards CSV (x,y[,r_m])", on_file= set_uploaded_haz_csv)
-            sl.Button("Import Hazards", on_click=on_import_hazards)
-
-        with sl.Row():
-            sl.FileDrop(label="Safe Zones CSV (node_id) OR (x,y)", on_file= set_uploaded_safe_csv)
-            sl.Button("Import Safe Zones", on_click=on_import_safezones)
-
-
 @sl.component
 def Page():
     _ = tick.value
     chart = park_chart()
     with sl.Column():
-        sl.Markdown("## West Coast Park — Evacuation (Solara)")
+        sl.Markdown("## West Coast Park — Evacuation & SCDF Responder Staging (Solara)")
         Controls()
-        sl.Markdown(f"**Hazards: {len(HAZARDS)}** | **Safe zones (auto+manual): {len(set(SAFE_NODES)|set(MANUAL_SAFE))}**")
+        sl.Markdown(f"**Hazards: {len(HAZARDS)}** | **Safe zones (auto+manual): {len(set(SAFE_NODES)|set(MANUAL_SAFE))}** | **Responders: {len(RESPONDERS)}**")
         sl.Markdown(f"**{kpi_eta_summary()}**")
         sl.FigurePlotly(chart)
 
