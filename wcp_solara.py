@@ -1064,6 +1064,42 @@ def qc_run(expected_margin_m=25.0):
 
     return summaries, issues, rows
 
+# --- Loading of exporting CSVs ---
+
+def _load_hazards_from_df(df):
+    """Accepts columns: x,y[,r_m,id]. x/y are in map coords (same as POS_DICT)."""
+    global HAZARDS, HAZARD_ID
+    required = {"x", "y"}
+    if not required.issubset(set(c.lower() for c in df.columns)):
+        raise ValueError("Hazards CSV must have columns: x, y (, r_m optional).")
+    HAZARDS.clear()
+    for _, row in df.iterrows():
+        x = float(row[[c for c in df.columns if c.lower()=="x"][0]])
+        y = float(row[[c for c in df.columns if c.lower()=="y"][0]])
+        r = float(row[[c for c in df.columns if c.lower()=="r_m"][0]]) if any(c.lower()=="r_m" for c in df.columns) else float(hazard_radius.value)
+        HAZARDS.append({"id": HAZARD_ID, "pos": np.array([x, y], dtype=float), "r_m": max(5.0, r)})
+        HAZARD_ID += 1
+    _recompute_safe_nodes(); _recompute_featured_safe(); _choose_targets_and_paths()
+
+def _load_manual_safe_from_df(df):
+    """Accepts either node_id column OR x,y columns (we snap x,y to nearest node)."""
+    global MANUAL_SAFE
+    cols = set(c.lower() for c in df.columns)
+    if "node_id" in cols:
+        MANUAL_SAFE = set(df["node_id"].astype(str).tolist())
+    elif {"x","y"}.issubset(cols):
+        new_safe = set()
+        for _, row in df.iterrows():
+            x = float(row[[c for c in df.columns if c.lower()=="x"][0]])
+            y = float(row[[c for c in df.columns if c.lower()=="y"][0]])
+            _, node_id = _nearest_node_idx(x, y)
+            new_safe.add(node_id)
+        MANUAL_SAFE = new_safe
+    else:
+        raise ValueError("Safe zones CSV must have node_id OR (x,y) columns.")
+    _recompute_featured_safe(); _choose_targets_and_paths()
+
+
 # -------------------- UI --------------------
 @sl.component
 def Controls():
@@ -1098,6 +1134,39 @@ def Controls():
     
     # Metrics UI state (use_state so UI updates reliably)
     metrics_text, set_metrics_text = sl.use_state("")
+
+    # --- CSV Import (Hazards / Safe Zones) ---
+    uploaded_haz_csv, set_uploaded_haz_csv = sl.use_state(None)
+    uploaded_safe_csv, set_uploaded_safe_csv = sl.use_state(None)
+
+    def on_import_hazards():
+        if not uploaded_haz_csv or "path" not in uploaded_haz_csv:
+            _notify("Choose a hazards CSV first."); return
+        try:
+            df = pd.read_csv(uploaded_haz_csv["path"])
+            _load_hazards_from_df(df)
+            # Reset timing since this usually means a new incident set
+            EVAC_NOTIFICATION_TICK.value = int(tick.value)
+            for p in PEOPLE:
+                p["evac_start_tick"] = int(tick.value)
+                p["evac_end_tick"] = None
+                p["evac_time_s"] = None
+            _force_evacuation_mode()
+            tick.value += 1
+            _notify("Imported hazards from CSV.")
+        except Exception as e:
+            _notify(f"Import hazards failed: {e}")
+
+    def on_import_safezones():
+        if not uploaded_safe_csv or "path" not in uploaded_safe_csv:
+            _notify("Choose a safe-zones CSV first."); return
+        try:
+            df = pd.read_csv(uploaded_safe_csv["path"])
+            _load_manual_safe_from_df(df)
+            _notify("Imported manual safe zones from CSV.")
+            tick.value += 1
+        except Exception as e:
+            _notify(f"Import safe zones failed: {e}")
 
 
     # ---------- sim controls ----------
@@ -1456,6 +1525,17 @@ def Controls():
 
         if last_error.value:
             sl.Markdown(f"**Render error:** {last_error.value}")
+            
+        sl.Markdown("**CSV Import**")
+
+        with sl.Row():
+            sl.FileDrop(label="Hazards CSV (x,y[,r_m])", on_file= set_uploaded_haz_csv)
+            sl.Button("Import Hazards", on_click=on_import_hazards)
+
+        with sl.Row():
+            sl.FileDrop(label="Safe Zones CSV (node_id) OR (x,y)", on_file= set_uploaded_safe_csv)
+            sl.Button("Import Safe Zones", on_click=on_import_safezones)
+
 
 @sl.component
 def Page():
