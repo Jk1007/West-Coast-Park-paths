@@ -571,15 +571,39 @@ def metrics_collect():
     return rows, summary
 
 def evaluate_safe_zone_effectiveness():
-    s_rows, s = metrics_collect()
-    if s["samples"] == 0:
-        return "No agents have reached a safe zone yet — effectiveness cannot be evaluated."
+    t = _totals_now()
+    rows, summary = metrics_collect()  # already computes samples & percentiles
+
+    # Build times from the correct key
+    reached_times = [r["evac_time_s"] for r in rows
+                     if r.get("reached") and r.get("evac_time_s") is not None]
+
+    if not reached_times:
+        return (
+            f"**Effectiveness (Safe Zone Deployment)**\n\n"
+            f"- Total people: {t['total']}\n"
+            f"- Reached safe zone: {t['reached']}\n"
+            f"- Aware now: {t['aware']}\n"
+            f"- In envelope now: {t['evacuees']}\n\n"
+            f"_No agents have reached a safe zone yet — run the sim (START/STEP) and try again._"
+        )
+
     return (
-        f"Effectiveness — Reached: {s['reached_agents']}/{s['total_agents']} "
-        f"({s['pct_reached']:.1f}%). Avg {s['avg_time_s']:.1f}s, "
-        f"P50 {s['p50_time_s']:.1f}s, P90 {s['p90_time_s']:.1f}s, "
-        f"Max {s['max_time_s']:.1f}s."
+        f"**Effectiveness (Safe Zone Deployment)**\n\n"
+        f"- Total people: {t['total']}\n"
+        f"- Reached safe zone: {t['reached']} "
+        f"({summary['pct_reached']:.1f}% of total)\n"
+        f"- Aware now: {t['aware']}\n"
+        f"- In envelope now: {t['evacuees']}\n\n"
+        f"- Time-to-safe (reached only): "
+        f"avg {summary['avg_time_s']:.1f}s | "
+        f"P50 {summary['p50_time_s']:.1f}s | "
+        f"P90 {summary['p90_time_s']:.1f}s | "
+        f"max {summary['max_time_s']:.1f}s "
+        f"(n={summary['samples']})"
     )
+
+
 
 # --------- ETA-based Safe Zone Optimization ----------
 def _average_eta_for_safe_set(safe_nodes_set, speed_mps=1.4, sample_size=400):
@@ -954,6 +978,15 @@ def _collect_paths_polylines(evac_only=True, max_agents=300):
             break
     return xs, ys
 
+def _totals_now():
+    """Unified counts used by QC and Effectiveness."""
+    tnow = float(tick.value)
+    total = len(PEOPLE)
+    evacuees_now = sum(1 for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow))
+    aware_now = sum(1 for p in PEOPLE if p.get("aware", False))
+    reached_now = sum(1 for p in PEOPLE if p.get("reached", False))
+    return dict(total=total, evacuees=evacuees_now, aware=aware_now, reached=reached_now)
+
 def qc_run(expected_margin_m=25.0):
     summaries = []
     issues = []
@@ -975,8 +1008,9 @@ def qc_run(expected_margin_m=25.0):
                 issues.append(f"{suspicious} safe zone(s) are < {expected_margin_m:.0f} m from a hazard centre.")
 
     tnow = float(tick.value)
+    tot = _totals_now()
     evacuees = [p for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow)]
-    summaries.append(f"Evacuees detected now: {len(evacuees)} / {len(PEOPLE)} total")
+    summaries.append(f"People now: total={tot['total']} | in-envelope={tot['evacuees']} | aware={tot['aware']} | reached={tot['reached']}")
 
     no_path = 0
     total_len_m = []
@@ -1146,6 +1180,17 @@ def Controls():
             tick.value += 1
 
         _notify("Parameters applied.")
+
+            # If population size or cyclist %, respawn to match new inputs
+        need_respawn = (int(num_people.value) != prev_people) or (int(pct_cyclists.value) != prev_pct_cyclists)
+        if need_respawn:
+            reset_model()  # rebuild PEOPLE
+            # clear QC/metrics text so you don't see stale counts
+            qc_summary.value = ""
+            qc_issues.value = ""
+            if 'set_metrics_text' in locals():
+                set_metrics_text("")
+
 
     def on_qc_margin_submit():
         try:
