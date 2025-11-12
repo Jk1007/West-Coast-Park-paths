@@ -100,6 +100,9 @@ weather_str = sl.reactive("Weather: —")
 _last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
 
+# --- Evacuation timing metrics ---
+EVAC_NOTIFICATION_TICK = sl.reactive(None)  # record when hazard notified
+
 # Per-run state
 PEOPLE = []
 HAZARDS = []   # {"id": int, "pos": np.array([x,y]), "r_m": float}
@@ -336,6 +339,10 @@ def _spawn_people(n):
             "aware": False, "aware_delay": float(base_awareness_lag.value + rng.uniform(-2, 2)),
             "reached": False, "target_node": None, "path": [], "path_idx": 0,
             "affected_since": None,
+            # timing metrics
+            "evac_start_tick": None,
+            "evac_end_tick": None,
+            "evac_time_s": None,
         })
     PEOPLE.extend(new_people)
 
@@ -356,11 +363,9 @@ def _force_evacuation_mode():
     tnow = float(tick.value)
     for p in PEOPLE:
         p["aware"] = True
-        # mark them as 'affected' starting now and immediately retarget
         p["affected_since"] = tnow
         p["reached"] = False
         _retarget_to_nearest_safe(p)
-
 
 def reset_model():
     global PEOPLE
@@ -399,10 +404,12 @@ def _step_once():
         # Determine if this person should evacuate this tick
         if global_hazard:
             affected = True
-            # make sure they are aware and have a target right away
             if not p.get("aware", False):
                 p["aware"] = True
                 p["affected_since"] = tnow
+                # stamp start time if this is the first awareness under global hazard
+                if p.get("evac_start_tick") is None and EVAC_NOTIFICATION_TICK.value is not None:
+                    p["evac_start_tick"] = int(EVAC_NOTIFICATION_TICK.value)
                 _retarget_to_nearest_safe(p)
         else:
             affected = _is_person_expected_affected(p["pos"], tnow)
@@ -432,6 +439,11 @@ def _step_once():
         if k >= len(path) - 1:
             p["reached"] = True
             p["dir"] = np.array([0.0, 0.0])
+            # record end time
+            if p.get("evac_end_tick") is None and p.get("evac_start_tick") is not None:
+                p["evac_end_tick"] = int(tick.value)
+                # treat 1 step = 1s (consistent under STEP/manual too)
+                p["evac_time_s"] = float(p["evac_end_tick"] - p["evac_start_tick"])
             continue
 
         cur_xy = p["pos"]
@@ -479,9 +491,12 @@ def _step_once():
 
         if np.linalg.norm(p["pos"] - next_xy) < 2.0 and (p["path_idx"] >= len(path) - 2):
             p["reached"] = True
+            # record end time first time they reach
+            if p.get("evac_end_tick") is None and p.get("evac_start_tick") is not None:
+                p["evac_end_tick"] = int(tick.value)
+                p["evac_time_s"] = float(p["evac_end_tick"] - p["evac_start_tick"])
 
     tick.value += 1
-
 
 def _path_remaining_meters(p):
     path = p["path"]; k = p["path_idx"]
@@ -503,7 +518,7 @@ def agents_df():
             colors.append("green")
         else:
             affected = _is_person_expected_affected(p["pos"], tnow)
-            if not affected:
+            if not affected and not HAZARDS:
                 colors.append("steelblue")
             else:
                 h, d_m = _nearest_hazard_m(p["pos"])
@@ -523,6 +538,117 @@ def kpi_eta_summary():
         etas.append(remaining / spd)
     if not etas: return "All safe or no active evacuations."
     return f"ETA to safe zone — avg: {np.mean(etas):.1f}s | P90: {np.percentile(etas,90):.1f}s | max: {np.max(etas):.1f}s"
+
+# --------- Metrics & Effectiveness ----------
+def metrics_collect():
+    """Return (per_agent_rows, summary_dict). evac_time_s for those who reached."""
+    rows = []
+    times = []
+    total = len(PEOPLE)
+    reached = 0
+    for i, p in enumerate(PEOPLE):
+        et = p.get("evac_time_s")
+        rows.append({
+            "agent_id": i,
+            "reached": bool(p.get("reached", False)),
+            "evac_time_s": None if et is None else float(et),
+            "is_cyclist": bool(p.get("is_cyclist", False)),
+        })
+        if et is not None:
+            times.append(float(et))
+        if p.get("reached", False):
+            reached += 1
+    summary = {
+        "total_agents": total,
+        "reached_agents": reached,
+        "pct_reached": (100.0 * reached / total) if total else 0.0,
+        "avg_time_s": float(np.mean(times)) if times else None,
+        "p50_time_s": float(np.percentile(times, 50)) if times else None,
+        "p90_time_s": float(np.percentile(times, 90)) if times else None,
+        "max_time_s": float(np.max(times)) if times else None,
+        "samples": len(times),
+    }
+    return rows, summary
+
+def evaluate_safe_zone_effectiveness():
+    s_rows, s = metrics_collect()
+    if s["samples"] == 0:
+        return "No agents have reached a safe zone yet — effectiveness cannot be evaluated."
+    return (
+        f"Effectiveness — Reached: {s['reached_agents']}/{s['total_agents']} "
+        f"({s['pct_reached']:.1f}%). Avg {s['avg_time_s']:.1f}s, "
+        f"P50 {s['p50_time_s']:.1f}s, P90 {s['p90_time_s']:.1f}s, "
+        f"Max {s['max_time_s']:.1f}s."
+    )
+
+# --------- ETA-based Safe Zone Optimization ----------
+def _average_eta_for_safe_set(safe_nodes_set, speed_mps=1.4, sample_size=400):
+    """Estimate average ETA over a sampled set of nodes given a candidate safe-node set."""
+    if not safe_nodes_set:
+        return float("inf")
+    n = min(sample_size, len(NODE_IDS))
+    idxs = rng.choice(len(NODE_IDS), size=n, replace=False)
+    sample_ids = [NODE_IDS[int(i)] for i in idxs]
+    etas = []
+    for nid in sample_ids:
+        best = None; best_len = float("inf")
+        for t in safe_nodes_set:
+            L = _nx_path_length(nid, t)
+            if L < best_len:
+                best_len = L; best = t
+        if best is None or not np.isfinite(best_len):
+            continue
+        etas.append(best_len / max(0.1, speed_mps))
+    if not etas:
+        return float("inf")
+    return float(np.mean(etas))
+
+def _optimize_safe_zones_by_eta(k=None, attempts=8, speed_mps=1.4, sample_size=400):
+    """
+    Try multiple greedy seeds (using hazard-distance scoring) and keep the set
+    that minimizes average ETA. Writes result to MANUAL_SAFE.
+    """
+    global MANUAL_SAFE
+    k = int(k or max(4, min(12, N_SAFE)))
+    if not NODE_POS.size:
+        return False
+
+    # base scores similar to _suggest_optimized_safe
+    if HAZARDS:
+        scores = np.array([_nearest_hazard_m(NODE_POS[i])[1] for i in range(NODE_POS.shape[0])], float)
+    else:
+        center = NODE_POS.mean(axis=0)
+        scores = np.array([map_distance_m(NODE_POS[i], center) for i in range(NODE_POS.shape[0])], float)
+
+    order = np.argsort(-scores)
+    pool_idx_full = order[:max(5*k, k+100)]
+
+    best_set = None
+    best_eta = float("inf")
+
+    for _ in range(max(1, attempts)):
+        if len(pool_idx_full) == 0:
+            break
+        seed = int(rng.choice(pool_idx_full))
+        chosen = [seed]
+        dmin = np.full(pool_idx_full.shape[0], np.inf)
+        for _i in range(1, k):
+            last_pt = NODE_POS[chosen[-1]]
+            dmin = np.minimum(dmin, np.linalg.norm(NODE_POS[pool_idx_full] - last_pt, axis=1))
+            nxt = pool_idx_full[int(np.argmax(dmin))]
+            chosen.append(int(nxt))
+        cand = set([NODE_IDS[i] for i in chosen])
+        eta = _average_eta_for_safe_set(cand, speed_mps=speed_mps, sample_size=sample_size)
+        if eta < best_eta:
+            best_eta = eta
+            best_set = cand
+
+    if best_set:
+        MANUAL_SAFE = set(best_set)
+        _recompute_featured_safe()
+        _choose_targets_and_paths()
+        return True
+    return False
 
 def _plume_concentration_grid(x_domain, y_domain):
     try:
@@ -935,6 +1061,10 @@ def Controls():
     risk_show_s, set_risk_show_s = sl.use_state("true" if risk_show.value else "false")
     risk_grid_s, set_risk_grid_s = sl.use_state(str(int(risk_grid.value)))
     risk_speed_s, set_risk_speed_s = sl.use_state(f"{float(risk_speed_mps.value):.2f}")
+    
+    # Metrics UI state (use_state so UI updates reliably)
+    metrics_text, set_metrics_text = sl.use_state("")
+
 
     # ---------- sim controls ----------
     def on_step(): _step_once()
@@ -957,6 +1087,8 @@ def Controls():
 
     # ---------- APPLY / QC handlers (read from local states ONLY) ----------
     def on_apply_parameters():
+        prev_people = int(num_people.value)
+        prev_pct_cyclists = int(pct_cyclists.value)
         try:
             num_people.value = max(0, int((people_s or "").strip()))
         except: pass
@@ -1003,10 +1135,16 @@ def Controls():
         try: risk_speed_mps.value = max(0.1, float((risk_speed_s or '').strip()))
         except: pass
 
-        _recompute_safe_nodes()
-        _recompute_featured_safe()
-        _choose_targets_and_paths()
-        tick.value += 1
+            # If population size or cyclist %, respawn to match new inputs
+        need_respawn = (int(num_people.value) != prev_people) or (int(pct_cyclists.value) != prev_pct_cyclists)
+        if need_respawn:
+            reset_model()  # re-spawns PEOPLE using the new settings
+        else:
+            _recompute_safe_nodes()
+            _recompute_featured_safe()
+            _choose_targets_and_paths()
+            tick.value += 1
+
         _notify("Parameters applied.")
 
     def on_qc_margin_submit():
@@ -1092,11 +1230,18 @@ def Controls():
         _recompute_safe_nodes()
         _recompute_featured_safe()
         _choose_targets_and_paths()
-        _force_evacuation_mode()   # <<— NEW: immediate all-agents evacuation
+
+        # NEW: record global notification tick for timing & reset agent timers
+        EVAC_NOTIFICATION_TICK.value = int(tick.value)
+        for p in PEOPLE:
+            p["evac_start_tick"] = int(tick.value)
+            p["evac_end_tick"] = None
+            p["evac_time_s"] = None
+
+        _force_evacuation_mode()
 
         tick.value += 1
         _notify("Hazard added — all agents evacuating now.")
-
 
     def on_remove_by_id():
         txt = (remove_id_s or "").strip()
@@ -1204,7 +1349,41 @@ def Controls():
             with sl.Row():
                 sl.Button("Apply Parameters", on_click=on_apply_parameters)
 
-        sl.Markdown("**Safe Zones — manual & optimize**")
+        # --- Metrics + Optimization controls (separate; does not touch parameter area) ---
+        sl.Markdown("**Evacuation Metrics & Optimization**")
+        def on_eval_effectiveness():
+            set_metrics_text(evaluate_safe_zone_effectiveness())
+
+        def on_export_metrics():
+            rows, summary = metrics_collect()
+            df = pd.DataFrame(rows)
+            path = "/mnt/data/agent_evac_times.csv"
+            try:
+                df.to_csv(path, index=False)
+                _notify("Exported per-agent metrics to CSV.")
+                set_metrics_text(
+                    evaluate_safe_zone_effectiveness() + f"\n[Download per-agent CSV](sandbox:{path})"
+                )
+            except Exception as e:
+                _notify(f"Export failed: {e}")
+
+        def on_optimize_min_eta():
+            ok = _optimize_safe_zones_by_eta(
+                k=N_SAFE, attempts=10, speed_mps=float(risk_speed_mps.value), sample_size=500
+            )
+            _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
+            _notify("Optimized safe zones (min-ETA)." if ok else "Optimization failed; kept previous safe zones.")
+
+
+        with sl.Row():
+            sl.Button("Evaluate Effectiveness", on_click=on_eval_effectiveness)
+            sl.Button("Export Metrics CSV", on_click=on_export_metrics)
+            sl.Button("Suggest (min-ETA) Safe Zones", on_click=on_optimize_min_eta)
+
+        if metrics_text:
+            sl.Markdown(metrics_text)
+
+        sl.Markdown("**Safe Zones — manual & distance-optimize**")
         with sl.Row():
             sl.InputText(label="Add Safe Zone (phrase)",
                          value=safe_phrase_s, on_value=set_safe_phrase_s,
@@ -1223,12 +1402,12 @@ def Controls():
             def on_clear_safe():
                 MANUAL_SAFE.clear(); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
                 _notify("Manual safe zones cleared.")
-            def on_optimize():
+            def on_optimize_dist():
                 _suggest_optimized_safe(k=N_SAFE); _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
-                _notify("Optimized safe zones suggested.")
+                _notify("Optimized safe zones (distance-based) suggested.")
             sl.Button("Add Safe Zone Here", on_click=on_add_safe)
             sl.Button("Clear Safe Zones", on_click=on_clear_safe)
-            sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize)
+            sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize_dist)
 
         if last_error.value:
             sl.Markdown(f"**Render error:** {last_error.value}")
