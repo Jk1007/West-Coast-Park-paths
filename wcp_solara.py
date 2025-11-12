@@ -80,13 +80,13 @@ plume_Q_gs = sl.reactive(100.0)       # g/s
 plume_H_m = sl.reactive(20.0)         # m
 plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
-plume_grid = sl.reactive(90)          # rows
+plume_grid = sl.reactive(72)          # rows
 
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
 
 risk_show = sl.reactive(True)
-risk_grid = sl.reactive(90)
+risk_grid = sl.reactive(72)
 risk_speed_mps = sl.reactive(1.4)
 
 qc_summary = sl.reactive("")
@@ -860,11 +860,18 @@ def _build_response_demand(x_domain, y_domain):
     demand = np.maximum(demand, 0.0)
     return pgx, pgy, demand
 
-def _suggest_responders(k=5):
-    """Place k responder staging nodes near the peaks of response demand, while spreading them out."""
+def _suggest_responders(k=5, min_sep_m=120.0, knn=6):
+    """
+    Place k responder staging nodes near peaks of response demand, while spreading them out.
+    - min_sep_m: minimum separation between chosen nodes (meters)
+    - knn: number of nearest graph nodes to try per demand peak (to avoid all snapping to the same node)
+    """
     global RESPONDERS
-    if k <= 0:
-        RESPONDERS = set(); return False
+    k = int(max(0, k))
+    if k == 0:
+        RESPONDERS = set()
+        return False
+
     # domain from nodes
     xmin, ymin = NODE_POS.min(axis=0)
     xmax, ymax = NODE_POS.max(axis=0)
@@ -873,51 +880,92 @@ def _suggest_responders(k=5):
     x_domain = [float(xmin - padx), float(xmax + padx)]
     y_domain = [float(ymin - pady), float(ymax + pady)]
 
-    pgx, pgy, demand = _build_response_demand(x_domain, y_domain)
+    built = _build_response_demand(x_domain, y_domain)
+    if built is None:
+        RESPONDERS = set()
+        return False
+    pgx, pgy, demand = built
     if demand is None or not np.isfinite(demand).any():
-        RESPONDERS = set(); return False
+        RESPONDERS = set()
+        return False
 
-    # Pick top M pixels by demand, map to nearest nodes, then do farthest-point sampling
-    M = int(max(50, 10 * k))
+    # Take a large set of top demand pixels
+    M = int(max(150, 20 * k))
     flat = demand.ravel()
-    if flat.size < M:
+    if flat.size == 0:
+        RESPONDERS = set()
+        return False
+    if M > flat.size:
         M = flat.size
-    top_idx = np.argpartition(-flat, M-1)[:M]
+    top_idx = np.argpartition(-flat, M - 1)[:M]
     iy, ix = np.unravel_index(top_idx, demand.shape)
-    cand_pts = np.column_stack([pgx[ix], pgy[iy]])
+    peak_pts = np.column_stack([pgx[ix], pgy[iy]])  # (x,y) in map coords
 
-    # snap to nearest graph nodes
-    _, nidxs = KD.query(cand_pts)
-    node_cands = [NODE_IDS[i] for i in nidxs]
+    # For each peak, consider the K nearest graph nodes (avoid collapsing to 1 node)
+    # We'll iterate peaks in descending demand order.
+    order = np.argsort(-flat[top_idx])
+    chosen = []
+    chosen_set = set()
 
-    # remove duplicates while preserving order
-    seen = set(); unique_nodes = []
-    for nid in node_cands:
-        if nid in seen: continue
-        seen.add(nid); unique_nodes.append(nid)
-    if not unique_nodes:
-        RESPONDERS = set(); return False
+    for rank in order:
+        px, py = peak_pts[int(rank)]
+        # knn nearest nodes
+        dists, nidxs = KD.query([px, py], k=min(int(knn), len(NODE_IDS)))
+        if np.ndim(nidxs) == 0:  # when knn==1 returns scalar
+            nidxs = [int(nidxs)]
+        placed_here = False
+        for ni in nidxs:
+            nid = NODE_IDS[int(ni)]
+            if nid in chosen_set:
+                continue
+            candidate_xy = np.array(POS_DICT[nid], dtype=float)
 
-    # farthest-point sampling on node coordinates
-    chosen = [unique_nodes[0]]
-    for _ in range(1, k):
-        best = None; best_d = -1.0
-        for nid in unique_nodes:
-            if nid in chosen: continue
-            # distance to nearest chosen (map-distance)
-            pt = np.array(POS_DICT[nid])
-            dmin = float("inf")
+            # enforce minimum separation to already chosen nodes
+            sep_ok = True
             for c in chosen:
-                dmin = min(dmin, map_distance_m(pt, np.array(POS_DICT[c])))
-            if dmin > best_d:
-                best_d = dmin; best = nid
-        if best is not None:
-            chosen.append(best)
-        else:
+                if map_distance_m(candidate_xy, np.array(POS_DICT[c], dtype=float)) < float(min_sep_m):
+                    sep_ok = False
+                    break
+            if not sep_ok:
+                continue
+
+            chosen.append(nid)
+            chosen_set.add(nid)
+            placed_here = True
+            break  # go to next peak
+
+        if len(chosen) >= k:
             break
 
+    # Fallback: if still not enough (very dense snapping), fill with farthest nodes from what we have
+    if len(chosen) < k:
+        # Build a broad pool across all nodes
+        pool = np.arange(len(NODE_IDS))
+        # Greedy farthest-point sampling over raw node coords
+        while len(chosen) < k and len(pool) > 0:
+            best = None
+            best_d = -1.0
+            for idx in pool:
+                nid = NODE_IDS[int(idx)]
+                if nid in chosen_set:
+                    continue
+                pt = np.array(POS_DICT[nid], dtype=float)
+                # distance to nearest already-chosen
+                if chosen:
+                    dmin = min(map_distance_m(pt, np.array(POS_DICT[c], dtype=float)) for c in chosen)
+                else:
+                    dmin = float("inf")
+                if dmin > best_d and dmin >= float(min_sep_m) * 0.5:
+                    best_d = dmin
+                    best = nid
+            if best is None:
+                break
+            chosen.append(best)
+            chosen_set.add(best)
+
     RESPONDERS = set(chosen)
-    return True
+    return len(RESPONDERS) > 0
+
 
 # --------- Paths/collectors/QC ----------
 def _min_hazard_distance_at_xy(xy):
@@ -1226,6 +1274,15 @@ def Controls():
         tick.value += 1
         _notify("Hazard added — all agents evacuating now.")
 
+        # auto re-suggest responders if a target count is set
+        try:
+            k_auto = int(N_RESPONDERS.value)
+        except:
+            k_auto = 0
+        if k_auto > 0:
+            _suggest_responders(k=k_auto, min_sep_m=120.0, knn=6)
+
+
     def on_remove_by_id():
         txt = (remove_id_s or "").strip()
         if not txt.isdigit():
@@ -1279,9 +1336,10 @@ def Controls():
             k = max(0, int((responders_s or "0").strip()))
         except:
             k = int(N_RESPONDERS.value)
-        ok = _suggest_responders(k=k)
+        ok = _suggest_responders(k=k, min_sep_m=120.0, knn=6)
         tick.value += 1
         _notify("Suggested SCDF responder staging points." if ok else "Responder suggestion failed.")
+
 
     def on_clear_responders():
         RESPONDERS.clear()
