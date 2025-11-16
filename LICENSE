@@ -45,16 +45,71 @@ All usage requires written approval.
 
 3. Authorized Collaborators
 
-The following individuals are granted limited permission for non-commercial academic work:
+The Author grants the following specific copyright permissions to the individuals listed below.
+All permissions granted under this section are non-exclusive, non-commercial, non-transferable, and revocable at the sole discretion of the Author.
 
-Kho Soong Yang
+3.1. Kho Soong Yang
 
-Setoh Kai Heng
+Kho Soong Yang is granted a non-exclusive license to:
 
-Tan Hong Le
+- Access, use, and modify the source code;
+
+- Create derivative non-commercial academic works based on the code;
+
+- Incorporate portions of the code into his own academic or experimental projects;
+
+- Retain local copies for personal study and research.
 
 
-Their permissions are limited, non-transferable, and may be revoked at any time.
+This license does not permit:
+
+- Sublicensing,
+
+- Redistribution to any third party,
+
+- Commercial use, or
+
+- Integration into proprietary or commercial systems.
+
+
+All rights remain the exclusive property of the Author.
+
+3.2. Setoh Kai Heng
+
+3.3. Tan Hong Le
+
+Setoh Kai Heng and Tan Hong Le are each granted a limited copyright license to:
+
+- Access and view the code;
+
+- Run the software for academic learning and testing;
+
+- Submit contributions directly to this project at the Author’s request.
+
+
+They are not permitted to:
+
+- Create derivative works,
+
+- Redistribute or share any portion of the code,
+
+- Incorporate the code into external systems, or
+
+- Store or publish modified versions.
+
+
+All rights not expressly granted are reserved by the Author.
+
+3.4. Revocation
+
+The Author may revoke any collaborator’s license at any time.
+Upon revocation, the collaborator must:
+
+- Delete all local copies,
+
+- Cease use of the code, and
+
+- Stop distributing or referencing any derivative work created under the license.
 
 4. Required Attribution
 
