@@ -111,6 +111,14 @@ Upon revocation, the collaborator must:
 
 - Stop distributing or referencing any derivative work created under the license.
 
+3.5 Academic Collaboration
+
+Authorized collaborators may co-author academic papers, reports, or presentations that describe or analyze CrowdShield®, provided that:
+- The code itself is not redistributed,
+- Proper attribution is included,
+- The work remains non-commercial,
+- The publication does not grant rights to any third parties.
+
 4. Required Attribution
 
 Any authorized use must include this exact attribution string:
