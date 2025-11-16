@@ -17,4 +17,4 @@ Required attribution for any permitted use:
 CrowdShield® — Created by Wee Jun Kang. 
 Core collaborators: Kho Soong Yang, Setoh Kai Heng, Tan Hong Le.
 
-For complete terms, see the LICENSE and TERMS_OF_USE.md files.
+For complete terms, see the LICENSE.md files.
