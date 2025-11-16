@@ -1,9 +1,20 @@
-## Legal Notice
-This project is open-sourced under the GNU GPLv3 license.
+Copyright
 
-Any reuse, modification, or distribution of this code must also be released
-under the GPLv3. Unauthorized commercial usage, proprietary integration,
-or redistribution without proper attribution is strictly prohibited.
+CrowdShield®
+Copyright © 2025–present
+Wee Jun Kang. All rights reserved.
 
-This repository is timestamped by GitHub and protected under international
-copyright law. Any violation may result in a DMCA takedown.
+This repository is publicly viewable for portfolio and educational reference.
+All source code, algorithms, and documentation remain the exclusive intellectual property of the author.
+
+No part of this project may be copied, reused, modified, redistributed, or incorporated into other work without written permission.
+
+Authorized academic collaborators:
+Kho Soong Yang, Setoh Kai Heng, Tan Hong Le.
+
+Required attribution for any permitted use:
+
+CrowdShield® — Created by Wee Jun Kang. 
+Core collaborators: Kho Soong Yang, Setoh Kai Heng, Tan Hong Le.
+
+For complete terms, see the LICENSE and TERMS_OF_USE.md files.
