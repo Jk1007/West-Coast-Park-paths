@@ -557,6 +557,8 @@ def metrics_collect():
     }
     return rows, summary
 
+JKW_SIGNATURE = "CrowdShield® — Created by Wee Jun Kang. Core collaborators: Kho Soong Yang, Setoh Kai Heng, Tan Hong Le."
+
 def evaluate_safe_zone_effectiveness():
     t = _totals_now()
     rows, summary = metrics_collect()
