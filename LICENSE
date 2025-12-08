@@ -1,4 +1,4 @@
-TERMS OF USE (JKW LICENSE v1.0)
+TERMS OF USE (JKW LICENSE v1.1)
 
 CrowdShield®
 Copyright © 2025–present
@@ -48,7 +48,7 @@ All usage requires written approval.
 The Author grants the following specific copyright permissions to the individuals listed below.
 All permissions granted under this section are non-exclusive, non-commercial, non-transferable, and revocable at the sole discretion of the Author.
 
-3.1. Kho Soong Yang
+3.1. Kho Soong Yang 
 
 Kho Soong Yang is granted a non-exclusive license to:
 
@@ -76,9 +76,34 @@ All rights remain the exclusive property of the Author.
 
 3.2. Setoh Kai Heng
 
+Setoh Kai Heng is granted a non-exclusive license to:
+
+- Access, use, and modify the source code;
+
+- Create derivative non-commercial academic works based on the code;
+
+- Incorporate portions of the code into his own academic or experimental projects;
+
+- Retain local copies for personal study and research.
+
+
+This license does not permit:
+
+- Sublicensing,
+
+- Redistribution to any third party,
+
+- Commercial use, or
+
+- Integration into proprietary or commercial systems.
+
+
+All rights remain the exclusive property of the Author.
+
+
 3.3. Tan Hong Le
 
-Setoh Kai Heng and Tan Hong Le are each granted a limited copyright license to:
+Tan Hong Le are granted a limited copyright license to:
 
 - Access and view the code;
 
