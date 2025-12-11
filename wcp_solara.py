@@ -1,5 +1,5 @@
 # wcp_solara_test.py — West Coast Park evac with SCDF responder deployment optimiser
-# Run:  python -m solara run wcp_solara_test.py
+# Run: C:/Python313/python.exe "c:/HacX! 2025/HacXYES/West Coast Park paths/wcp_solara.py"
 
 import plotly.graph_objects as go
 import asyncio
@@ -1633,7 +1633,7 @@ def refresh_eta(eta_label):
 def redraw(plot):
     # Rebuild the Plotly figure and assign it to the NiceGUI element
     plot.figure = park_chart()
-    
+
     # Optional: if you want to force a re-render, you can also call:
     plot.update()
 
