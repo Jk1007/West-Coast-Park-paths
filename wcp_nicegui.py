@@ -80,6 +80,33 @@ with ui.row().classes('w-full h-screen'):
             placeholder='e.g. North, NE, 160°, 225°, 300m from center',
         ).classes('w-full')
 
+                # list all hazards by ID and description (where)
+        hazard_select = ui.select({},
+            label='Existing hazards (ID — location)',
+        ).classes('w-full')
+
+        def refresh_hazard_list():
+            """Update the hazard dropdown with all hazards."""
+            options = {}
+
+            for h in HAZARDS:
+                hid = h['id']
+                label = h.get('label')
+                if not label:
+                    pos = h['pos']
+                    label = f"({pos[0]:.0f}, {pos[1]:.0f})"
+                options[str(hid)] = f"#{hid} — {label}"
+
+            # Force NiceGUI to rebuild dropdown
+            hazard_select.set_options(options)
+
+            # Auto-select first hazard if list not empty
+            if options:
+                if hazard_select.value not in options:
+                    hazard_select.value = next(iter(options.keys()))
+            else:
+                hazard_select.value = None
+
         def add_hazard():
             phrase = (location_input.value or '').strip()
             pt = _point_from_phrase(phrase)
@@ -90,14 +117,19 @@ with ui.row().classes('w-full h-screen'):
                 )
                 return
 
-            from wcp_core import HAZARD_ID  # we need to bump the counter
+            
             # NOTE: because we imported HAZARD_ID by value, we use the module directly
             import wcp_core as core
 
+              # build a user-friendly label: use phrase, fallback to coords
+            hx, hy = float(pt[0]), float(pt[1])
+            label = phrase if phrase else f"({hx:.0f}, {hy:.0f})"
+
             core.HAZARDS.append({
                 'id': core.HAZARD_ID,
-                'pos': np.array([float(pt[0]), float(pt[1])], dtype=float),
+                'pos': np.array([hx, hy], dtype=float),
                 'r_m': float(max(5.0, hazard_radius.value)),
+                'label': label,  # <-- this stores the "where"
             })
             core.HAZARD_ID += 1
 
@@ -115,6 +147,7 @@ with ui.row().classes('w-full h-screen'):
 
             update_labels(status_label, eta_label)
             redraw(plot)
+            refresh_hazard_list()
             ui.notify('Hazard added, agents evacuating.', type='positive')
 
         def clear_hazards():
@@ -124,6 +157,7 @@ with ui.row().classes('w-full h-screen'):
             _choose_targets_and_paths()
             update_labels(status_label, eta_label)
             redraw(plot)
+            refresh_hazard_list()
             ui.notify('All hazards cleared.', type='positive')
 
         def remove_last_hazard():
@@ -137,12 +171,41 @@ with ui.row().classes('w-full h-screen'):
             _choose_targets_and_paths()
             update_labels(status_label, eta_label)
             redraw(plot)
+            refresh_hazard_list()
             ui.notify(f'Removed last hazard (ID {hid}).', type='positive')
+
+        
+        def remove_selected_hazard():
+            if not hazard_select.value:
+                ui.notify('No hazard selected.', type='warning')
+                return
+            target_id = int(hazard_select.value)
+
+            # delete matching hazard from HAZARDS list
+            for i, h in enumerate(HAZARDS):
+                if int(h.get('id')) == target_id:
+                    HAZARDS.pop(i)
+                    break
+            else:
+                ui.notify(f'Hazard ID {target_id} not found.', type='warning')
+                return
+
+            _recompute_safe_nodes()
+            _recompute_featured_safe()
+            _choose_targets_and_paths()
+            update_labels(status_label, eta_label)
+            redraw(plot)
+            refresh_hazard_list()
+            ui.notify(f'Removed hazard ID {target_id}.', type='positive')
 
         with ui.row().classes('w-full gap-2'):
             ui.button('Add Hazard', on_click=add_hazard).classes('w-1/2')
             ui.button('Clear Hazards', on_click=clear_hazards).classes('w-1/2')
         ui.button('Remove Last Hazard', on_click=remove_last_hazard).classes('w-full mt-1')
+        ui.button('Remove Selected Hazard', on_click=remove_selected_hazard).classes('w-full mt-1')
+
+        # in case there are pre-existing hazards from the core:
+        refresh_hazard_list()
 
         # --- Safe zones & SCDF responders ---
 
