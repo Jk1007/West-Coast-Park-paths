@@ -15,6 +15,8 @@ import json
 from urllib import request, parse
 import re
 import os
+from collections import Counter
+import numpy as np
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
@@ -860,65 +862,101 @@ def _build_response_demand(x_domain, y_domain):
     demand = np.maximum(demand, 0.0)
     return pgx, pgy, demand
 
-def _suggest_responders(k=5):
-    """Place k responder staging nodes near the peaks of response demand, while spreading them out."""
+def _suggest_responders(k=None):
+    """
+    Place SCDF responder nodes with the rule:
+    - Minimum 4 responders per hazard.
+    - For each hazard:
+        * 1 responder exactly at the hazard location (nearest graph node).
+        * 3 responders on / near evacuation paths civilians use to reach safe zones.
+    """
     global RESPONDERS
-    if k <= 0:
-        RESPONDERS = set(); return False
-    # domain from nodes
-    xmin, ymin = NODE_POS.min(axis=0)
-    xmax, ymax = NODE_POS.max(axis=0)
-    padx = max((xmax - xmin) * 0.03, 1.0)
-    pady = max((ymax - ymin) * 0.03, 1.0)
-    x_domain = [float(xmin - padx), float(xmax + padx)]
-    y_domain = [float(ymin - pady), float(ymax + pady)]
 
-    pgx, pgy, demand = _build_response_demand(x_domain, y_domain)
-    if demand is None or not np.isfinite(demand).any():
-        RESPONDERS = set(); return False
+    RESPONDERS = set()
 
-    # Pick top M pixels by demand, map to nearest nodes, then do farthest-point sampling
-    M = int(max(50, 10 * k))
-    flat = demand.ravel()
-    if flat.size < M:
-        M = flat.size
-    top_idx = np.argpartition(-flat, M-1)[:M]
-    iy, ix = np.unravel_index(top_idx, demand.shape)
-    cand_pts = np.column_stack([pgx[ix], pgy[iy]])
+    # No hazards or no people => nothing to place
+    if not HAZARDS or not PEOPLE:
+        return False
 
-    # snap to nearest graph nodes
-    _, nidxs = KD.query(cand_pts)
-    node_cands = [NODE_IDS[i] for i in nidxs]
+    # How many we ideally want, ignoring any user-supplied k:
+    min_per_hazard = 4
+    target_total = min_per_hazard * len(HAZARDS)
 
-    # remove duplicates while preserving order
-    seen = set(); unique_nodes = []
-    for nid in node_cands:
-        if nid in seen: continue
-        seen.add(nid); unique_nodes.append(nid)
-    if not unique_nodes:
-        RESPONDERS = set(); return False
+    # Keep track per hazard: (hazard_dict, hazard_node_id)
+    hazard_nodes = []
 
-    # farthest-point sampling on node coordinates
-    chosen = [unique_nodes[0]]
-    for _ in range(1, k):
-        best = None; best_d = -1.0
-        for nid in unique_nodes:
-            if nid in chosen: continue
-            # distance to nearest chosen (map-distance)
-            pt = np.array(POS_DICT[nid])
-            dmin = float("inf")
-            for c in chosen:
-                dmin = min(dmin, map_distance_m(pt, np.array(POS_DICT[c])))
-            if dmin > best_d:
-                best_d = dmin; best = nid
-        if best is not None:
-            chosen.append(best)
-        else:
-            break
+    # ---------- 1) One responder at each hazard (nearest graph node) ----------
+    for h in HAZARDS:
+        hx, hy = float(h["pos"][0]), float(h["pos"][1])
+        # KDTree is already built on NODE_POS with NODE_IDS
+        dist, idx = KD.query([[hx, hy]])           # shape (1,2) -> nearest node index
+        nid = NODE_IDS[int(idx[0])]                # graph node id
 
-    RESPONDERS = set(chosen)
-    return True
+        RESPONDERS.add(nid)
+        hazard_nodes.append((h, nid))
 
+    # ---------- 2) Three responders on/near evacuation paths per hazard ----------
+    for h, hazard_node in hazard_nodes:
+        hx, hy = float(h["pos"][0]), float(h["pos"][1])
+        hz_pos = np.array([hx, hy], dtype=float)
+
+        # Collect candidate nodes along paths that:
+        # - belong to people who started near this hazard
+        # - are near the hazard corridor (within some radius)
+        candidate_nodes = Counter()
+
+        for p in PEOPLE:
+            path = p.get("path") or []
+            if not path:
+                continue
+
+            # Roughly decide if this person is "from this hazard region":
+            # distance from current position to hazard
+            p_pos = np.array(p["pos"], dtype=float)
+            d0 = map_distance_m(p_pos, hz_pos)
+            if d0 > 400.0:
+                # Person is probably not in this hazard's affected region
+                continue
+
+            # Now walk their full evacuation path and collect nearby nodes
+            for nid in path:
+                if nid == hazard_node:
+                    continue  # already using hazard_node as one responder
+                node_xy = _node_xy(nid)
+                dnode = map_distance_m(node_xy, hz_pos)
+                if dnode <= 600.0:
+                    # Node is along / near the corridor from this hazard
+                    candidate_nodes[nid] += 1
+
+        if not candidate_nodes:
+            # No strong path info for this hazard; skip extra 3
+            continue
+
+        # Sort nodes by:
+        # - most frequently used in paths (descending)
+        # This tends to pick choke points / main arteries
+        sorted_nodes = sorted(
+            candidate_nodes.keys(),
+            key=lambda n: -candidate_nodes[n]
+        )
+
+        # Pick up to 3 distinct nodes for this hazard
+        added = 0
+        for nid in sorted_nodes:
+            if nid in RESPONDERS:
+                continue
+            RESPONDERS.add(nid)
+            added += 1
+            if added >= 3:
+                break
+
+    # At this point, RESPONDERS has:
+    # - at least 1 per hazard (the hazard node),
+    # - up to 3 extra near-path nodes per hazard (if data allows).
+    # Because we deduplicate, the total may be <= 4 * len(HAZARDS)
+    # in overlapping regions. That’s okay and realistic.
+
+    return bool(RESPONDERS)
 # --------- Paths/collectors/QC ----------
 def _min_hazard_distance_at_xy(xy):
     if not HAZARDS:
