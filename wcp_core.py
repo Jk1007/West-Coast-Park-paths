@@ -80,13 +80,13 @@ plume_Q_gs = sl.reactive(100.0)       # g/s
 plume_H_m = sl.reactive(20.0)         # m
 plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
-plume_grid = sl.reactive(90)          # rows
+plume_grid = sl.reactive(60)          # rows
 
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
 
 risk_show = sl.reactive(True)
-risk_grid = sl.reactive(90)
+risk_grid = sl.reactive(60)
 risk_speed_mps = sl.reactive(1.4)
 
 qc_summary = sl.reactive("")
