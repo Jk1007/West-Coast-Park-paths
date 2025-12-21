@@ -127,6 +127,16 @@ def pull_nea_realtime_weather_into_sim():
     print("NEA nearest values:", t_val, h_val, ws_val, wd_val)
     return t_val, h_val, ws_val, wd_val
 
+def wind_deg_to_compass(deg):
+    dirs = [
+        "North", "North-East", "East", "South-East",
+        "South", "South-West", "West", "North-West"
+    ]
+    if deg is None:
+        return None
+    idx = int((deg + 22.5) // 45) % 8
+    return dirs[idx]
+
 def pull_two_hr_forecast():
     url = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
     j = requests.get(url, timeout=4).json()
@@ -292,14 +302,17 @@ async def _runtime_info_loop():
         wd = wind_deg.value
 
         parts = []
-        if isinstance(t, (int, float)):
+        if isinstance(t, (int, float)): #temperature
             parts.append("Temp " + str(round(float(t), 1)) + "°C")
-        if isinstance(rh, (int, float)):
+        if isinstance(rh, (int, float)): #relative humidity
             parts.append("RH " + str(round(float(rh), 0)) + "%")
         if isinstance(ws, (int, float)):
-            parts.append("Wind " + str(round(float(ws), 2)) + " m/s")
-        if isinstance(wd, (int, float)):
-            parts.append(str(round(float(wd), 0)) + "°")
+            ws_kmh = float(ws) * 3.6 #wind speed
+            parts.append("Wind " + str(round(ws_kmh, 1)) + " km/h")
+        if isinstance(wd, (int, float)): #wind direction
+            compass = wind_deg_to_compass(float(wd))
+            parts.append("From " + compass + " (" + str(int(wd)) + "°)")
+
 
         if fc:
             parts.append("Forecast: " + str(fc))
