@@ -163,7 +163,23 @@ def wind_deg_to_compass(deg):
     idx = int((deg + 22.5) // 45) % 8
     return dirs[idx]
 
-def pull_two_hr_forecast():
+def _fmt_ampm(dt_obj):
+    # "6:30pm" style
+    s = dt_obj.strftime("%I:%M%p").lower()
+    if s.startswith("0"):
+        s = s[1:]
+    return s
+
+def _parse_iso(ts):
+    # Handles "2025-12-21T18:30:00+08:00" and "2025-12-21T18:30:00"
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def pull_two_hr_forecast_detail():
     url = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
     j = requests.get(url, timeout=4).json()
     data = j.get("data") or {}
@@ -171,16 +187,67 @@ def pull_two_hr_forecast():
     if len(items) == 0:
         return None
 
-    forecasts = items[0].get("forecasts") or []
-    # simplest: pick "West" if it exists
+    item0 = items[0]
+
+    # timestamps
+    valid_period = item0.get("valid_period") or {}
+    start_ts = valid_period.get("start")
+    end_ts = valid_period.get("end")
+    upd_ts = item0.get("update_timestamp") or item0.get("timestamp")
+
+    start_dt = _parse_iso(start_ts)
+    end_dt = _parse_iso(end_ts)
+    upd_dt = _parse_iso(upd_ts)
+
+    # area forecasts
+    forecasts = item0.get("forecasts") or []
+
+    # pick "West" if it exists (same as your old logic)
+    fc = None
     for f in forecasts:
         if (f.get("area") or "").lower() == "west":
-            return f.get("forecast")
+            fc = f.get("forecast")
+            break
+    if fc is None and len(forecasts) > 0:
+        fc = forecasts[0].get("forecast")
 
-    # else just return first (or implement nearest-area if coords are provided)
-    if len(forecasts) > 0:
-        return forecasts[0].get("forecast")
-    return None
+    out = {}
+    out["forecast"] = fc
+    out["start_dt"] = start_dt
+    out["end_dt"] = end_dt
+    out["updated_dt"] = upd_dt
+    return out
+
+def pull_24hr_forecast_summary():
+    url = "https://api-open.data.gov.sg/v2/real-time/api/24-hr-forecast"
+    j = requests.get(url, timeout=4).json()
+    data = j.get("data") or {}
+    items = data.get("items") or []
+    if len(items) == 0:
+        return None
+
+    item0 = items[0]
+    general = item0.get("general") or {}
+
+    temp = general.get("temperature") or {}
+    rh = general.get("relative_humidity") or {}
+    wind = general.get("wind") or {}
+    wind_speed = wind.get("speed") or {}
+
+    out = {}
+    out["forecast"] = general.get("forecast")
+
+    out["temp_low"] = temp.get("low")
+    out["temp_high"] = temp.get("high")
+
+    out["rh_low"] = rh.get("low")
+    out["rh_high"] = rh.get("high")
+
+    out["wind_low"] = wind_speed.get("low")
+    out["wind_high"] = wind_speed.get("high")
+    out["wind_dir"] = wind.get("direction")
+
+    return out
 
 
 
@@ -280,6 +347,9 @@ nea_wind_kmh = sl.reactive(None)   # what you show in UI
 nea_wind_mps = sl.reactive(None)   # what you use for physics
 nea_wind_from_deg = sl.reactive(None)  # NEA / myENV convention (FROM North, clockwise)
 weather_str = sl.reactive("Weather: —")
+weather_now_str = sl.reactive("—")
+forecast_2h_str = sl.reactive("—")
+forecast_24h_str = sl.reactive("—")
 _last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
 
@@ -308,53 +378,110 @@ def _notify(msg, timeout=1500):
 # -------------------- Weather fetch (stdlib-only) --------------------
 
 async def _runtime_info_loop():
+    first_run = True
     while True:
         now = datetime.now()
         time_str.value = now.strftime("%H:%M:%S")
         date_str.value = now.strftime("%A, %d %B %Y")
 
-        # refresh NEA readings every 5 minutes
-        if (now.timestamp() - float(_last_weather_ts.value or 0.0)) > 300.0:
+        
+        # refresh NEA readings immediately on first loop, then every 5 minutes
+        age = now.timestamp() - float(_last_weather_ts.value or 0.0)
+        if first_run or age > 300.0:
             try:
                 pull_nea_realtime_weather_into_sim()
             except Exception as e:
                 last_error.value = "NEA pull failed: " + repr(e)
             _last_weather_ts.value = now.timestamp()
 
-        # forecast (UI context)
-        fc = None
-        try:
-            fc = pull_two_hr_forecast()
-        except Exception as e:
-            last_error.value = "Forecast pull failed: " + repr(e)
 
-        # build a single UI string showing everything
+        fc2 = None
+        try:
+            fc2 = pull_two_hr_forecast_detail()
+        except Exception as e:
+            last_error.value = "2hr forecast failed: " + repr(e)
+
+        f24 = None
+        try:
+            f24 = pull_24hr_forecast_summary()
+        except Exception as e:
+            last_error.value = "24hr forecast failed: " + repr(e)
+       
+
+       # Current/Now Weather Conditions
+        cur = []
         t = temperature_c.value
         rh = relative_humidity_pct.value
-        ws = wind_speed.value
-        wd = nea_wind_from_deg.value
-
-        parts = []
-        if isinstance(t, (int, float)): #temperature
-            parts.append("Temp " + str(round(float(t), 1)) + "°C")
-        if isinstance(rh, (int, float)): #relative humidity
-            parts.append("RH " + str(round(float(rh), 0)) + "%")
-        ws_knots = nea_wind_knots.value
         ws_kmh = nea_wind_kmh.value
+        wd_from = nea_wind_from_deg.value
+
+        if isinstance(t, (int, float)):
+            cur.append("Temp " + str(round(float(t), 1)) + "°C")
+        if isinstance(rh, (int, float)):
+            cur.append("RH " + str(int(round(float(rh), 0))) + "%")
         if isinstance(ws_kmh, (int, float)):
-            parts.append("Wind " + str(round(float(ws_kmh), 1)) + " km/h")
-        if isinstance(wd, (int, float)): #wind direction
-            compass = wind_deg_to_compass(float(wd))
-            parts.append("From " + compass + " (" + str(int(wd)) + "°)")
+            cur.append("Wind " + str(round(float(ws_kmh), 1)) + " km/h")
+        if isinstance(wd_from, (int, float)):
+            compass = wind_deg_to_compass(float(wd_from))
+            if compass:
+                cur.append("From " + compass + " (" + str(int(round(float(wd_from), 0))) + "°)")
+            else:
+                cur.append("From " + str(int(round(float(wd_from), 0))) + "°")
 
+        weather_now_str.value = " | ".join(cur) if cur else "—"
 
-        if fc:
-            parts.append("Forecast: " + str(fc))
+# Next 2 hours prediction 
+        two = []
+        if fc2:
+            sd = fc2.get("start_dt")
+            ed = fc2.get("end_dt")
+            ud = fc2.get("updated_dt")
+            cond = fc2.get("forecast")
 
-        if parts:
-            weather_str.value = " | ".join(parts)
-        else:
-            weather_str.value = "Weather: —"
+            if sd and ed:
+                two.append("Forecast for " + _fmt_ampm(sd) + " - " + _fmt_ampm(ed))
+
+            if ud:
+                now2 = datetime.now(ud.tzinfo) if ud.tzinfo else datetime.now()
+                if ud.date() == now2.date():
+                    two.append("Updated: " + _fmt_ampm(ud) + " today")
+                else:
+                    two.append("Updated: " + _fmt_ampm(ud) + " " + ud.strftime("%d %b"))
+
+            if cond:
+                two.append(str(cond))
+
+        forecast_2h_str.value = " | ".join(two) if two else "—"
+
+# Next 24 hours prediction: 
+
+        day = []
+        if f24:
+            gf = f24.get("forecast")
+            if gf:
+                day.append(str(gf))
+
+            tl = f24.get("temp_low")
+            th = f24.get("temp_high")
+            if tl is not None and th is not None:
+                day.append("Temp " + str(tl) + "–" + str(th) + "°C")
+
+            rhl = f24.get("rh_low")
+            rhh = f24.get("rh_high")
+            if rhl is not None and rhh is not None:
+                day.append("Humidity " + str(rhl) + "–" + str(rhh) + "%")
+
+            wl = f24.get("wind_low")
+            wh = f24.get("wind_high")
+            wdir = f24.get("wind_dir") or ""
+            if wl is not None and wh is not None:
+                s = "Wind " + str(wl) + "–" + str(wh) + " km/h"
+                if wdir:
+                    s = s + " • " + str(wdir)
+                day.append(s)
+
+        forecast_24h_str.value = " | ".join(day) if day else "—"
+
 
         # IMPORTANT: avoid hot loop
         await asyncio.sleep(1.0)

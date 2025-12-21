@@ -10,13 +10,24 @@ from wcp_core import (  # imports simulation + chart
     _suggest_responders, _point_from_phrase, kpi_eta_summary,
     _totals_now, park_chart, EVAC_NOTIFICATION_TICK)
 
-from wcp_core import weather_str, time_str, date_str, wind_speed, wind_deg, temperature_c, relative_humidity_pct
+from wcp_core import weather_now_str, forecast_2h_str, forecast_24h_str, weather_str, time_str, date_str, wind_speed, wind_deg, temperature_c, relative_humidity_pct
 import numpy as np
 import asyncio
+from nicegui import ui, app
 import wcp_core as core
 
-# Start background weather/time updater once
-asyncio.get_event_loop().create_task(core._runtime_info_loop())
+_started = False
+
+def _start_background_tasks():
+    global _started
+    if _started:
+        return
+    _started = True
+    asyncio.create_task(core._runtime_info_loop())
+
+app.on_startup(_start_background_tasks)
+
+
 
 # ---------- helpers to keep labels in sync ----------
 
@@ -274,10 +285,18 @@ with ui.row().classes('w-full h-screen'):
 
         ui.separator()
         ui.markdown('### Status')
-        ui.markdown('**Weather (NEA):**')
+        ui.markdown('**Weather (NEA)**')
+        with ui.grid(columns=2).classes('w-full gap-2'):
+            ui.label('Now').classes('font-bold')
+            ui.label().bind_text_from(weather_now_str, 'value')
+
+            ui.label('Next 2 hours').classes('font-bold')
+            ui.label().bind_text_from(forecast_2h_str, 'value')
+
+            ui.label('Next 24 hours').classes('font-bold')
+            ui.label().bind_text_from(forecast_24h_str, 'value')
         ui.label().bind_text_from(time_str, 'value')
         ui.label().bind_text_from(date_str, 'value')
-        ui.label().bind_text_from(weather_str, 'value')
         ui.markdown('**Evacuation ETA summary:**')
         ui.label().bind_text_from(eta_label, 'text')
         ui.markdown('**Counts:**')
