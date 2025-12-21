@@ -124,7 +124,16 @@ def pull_nea_realtime_weather_into_sim():
         wind_speed.value = float(nea_wind_mps.value) * float(tick_seconds.value)
 
     if isinstance(wd_val, (int, float)):
-        wind_deg.value = float(wd_val)
+        nea = float(wd_val)                      # NEA: FROM North, clockwise
+        nea_wind_from_deg.value = nea            # UI should show this
+
+        # For physics: we need the direction the wind BLOWS TOWARDS
+        to_deg = (nea + 180.0) % 360.0           # still North-based, clockwise
+
+        # Convert North-based clockwise to your sim's math angle (0=East, CCW)
+        sim_deg = (90.0 - to_deg) % 360.0
+        wind_deg.value = sim_deg
+
 
     if isinstance(t_val, (int, float)):
         temperature_c.value = float(t_val)
@@ -141,6 +150,7 @@ def pull_nea_realtime_weather_into_sim():
     print("NEA nearest values:", t_val, h_val, ws_val, wd_val)
     print("WS raw:", ws_val, "Station taking values from:", nea_station_ws.value)
     print("WS unit:", ws_data.get("readingUnit"), "raw:", ws_val, "=> km/h:", nea_wind_kmh.value)
+    print("WD NEA(from):", nea_wind_from_deg.value, "sim_deg(to, math):", wind_deg.value)
     return t_val, h_val, ws_val, wd_val
 
 def wind_deg_to_compass(deg):
@@ -268,6 +278,7 @@ tick_seconds = sl.reactive(0.05)   # matches asyncio.sleep(0.05)
 nea_wind_knots = sl.reactive(None)
 nea_wind_kmh = sl.reactive(None)   # what you show in UI
 nea_wind_mps = sl.reactive(None)   # what you use for physics
+nea_wind_from_deg = sl.reactive(None)  # NEA / myENV convention (FROM North, clockwise)
 weather_str = sl.reactive("Weather: —")
 _last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
@@ -321,7 +332,7 @@ async def _runtime_info_loop():
         t = temperature_c.value
         rh = relative_humidity_pct.value
         ws = wind_speed.value
-        wd = wind_deg.value
+        wd = nea_wind_from_deg.value
 
         parts = []
         if isinstance(t, (int, float)): #temperature
