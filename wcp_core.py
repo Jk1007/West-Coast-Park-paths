@@ -219,10 +219,10 @@ def pull_two_hr_forecast_detail():
     return out
 
 def pull_24hr_forecast_summary():
-    url = "https://api-open.data.gov.sg/v2/real-time/api/24-hr-forecast"
-    j = requests.get(url, timeout=4).json()
-    data = j.get("data") or {}
-    items = data.get("items") or []
+    url = "https://api.data.gov.sg/v1/environment/24-hour-weather-forecast"
+    j = requests.get(url, timeout=6).json()
+
+    items = j.get("items") or []
     if len(items) == 0:
         return None
 
@@ -236,20 +236,14 @@ def pull_24hr_forecast_summary():
 
     out = {}
     out["forecast"] = general.get("forecast")
-
     out["temp_low"] = temp.get("low")
     out["temp_high"] = temp.get("high")
-
     out["rh_low"] = rh.get("low")
     out["rh_high"] = rh.get("high")
-
     out["wind_low"] = wind_speed.get("low")
     out["wind_high"] = wind_speed.get("high")
     out["wind_dir"] = wind.get("direction")
-
     return out
-
-
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
