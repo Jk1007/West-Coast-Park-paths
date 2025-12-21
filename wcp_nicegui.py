@@ -13,19 +13,8 @@ from wcp_core import (  # imports simulation + chart
 from wcp_core import weather_now_str, forecast_2h_str, forecast_24h_str, weather_str, time_str, date_str, wind_speed, wind_deg, temperature_c, relative_humidity_pct
 import numpy as np
 import asyncio
-from nicegui import ui, app
 import wcp_core as core
 
-_started = False
-
-def _start_background_tasks():
-    global _started
-    if _started:
-        return
-    _started = True
-    asyncio.create_task(core._runtime_info_loop())
-
-app.on_startup(_start_background_tasks)
 
 
 
@@ -321,6 +310,18 @@ with ui.row().classes('w-full h-screen'):
                 ui.notify(f'Simulation error, paused: {e}', type='negative')
 
         ui.timer(0.2, timer_tick)  # 5 FPS
+        # Start NEA background updater once (script-mode safe)
+        _started_weather = False
+
+        def start_weather_once():
+            global _started_weather
+            if _started_weather:
+                return
+            _started_weather = True
+            asyncio.create_task(core._runtime_info_loop())
+
+        ui.timer(1.0, start_weather_once, once=True)
+
 
     # ===== RIGHT PANEL – plot =====
     with ui.column().classes('w-2/3 p-4'):
