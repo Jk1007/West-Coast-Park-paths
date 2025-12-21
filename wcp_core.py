@@ -105,10 +105,24 @@ def pull_nea_realtime_weather_into_sim():
     wd_map = _station_id_to_name(wd_stations)
     sid_wd = _get_nearest_station_id(wd_stations, PARK_LAT, PARK_LON)
     wd_val = _get_value_for_station(wd_readings, sid_wd)
+   
+
 
     # apply into reactive sim vars
     if isinstance(ws_val, (int, float)):
-        wind_speed.value = float(ws_val)
+        unit = (ws_data.get("readingUnit") or "").strip().lower()
+
+        # --- compute km/h for display (no if/else) ---
+        kmh_mult = (unit == "knots") * 1.852 + (unit == "m/s") * 3.6 + (unit == "km/h") * 1.0
+        nea_wind_kmh.value = float(ws_val) * float(kmh_mult)
+
+        # --- compute m/s for physics (no if/else) ---
+        mps_mult = (unit == "knots") * 0.514444 + (unit == "m/s") * 1.0 + (unit == "km/h") * (1.0 / 3.6)
+        nea_wind_mps.value = float(ws_val) * float(mps_mult)
+
+        # your sim uses meters-per-tick
+        wind_speed.value = float(nea_wind_mps.value) * float(tick_seconds.value)
+
     if isinstance(wd_val, (int, float)):
         wind_deg.value = float(wd_val)
 
@@ -123,8 +137,10 @@ def pull_nea_realtime_weather_into_sim():
     nea_station_ws.value = str(ws_map.get(sid_ws, ""))
     nea_station_wd.value = str(wd_map.get(sid_wd, ""))
 
-    #for testing if values even show
+    #for testing if values even show and find nearest station
     print("NEA nearest values:", t_val, h_val, ws_val, wd_val)
+    print("WS raw:", ws_val, "Station taking values from:", nea_station_ws.value)
+    print("WS unit:", ws_data.get("readingUnit"), "raw:", ws_val, "=> km/h:", nea_wind_kmh.value)
     return t_val, h_val, ws_val, wd_val
 
 def wind_deg_to_compass(deg):
@@ -246,6 +262,12 @@ qc_rows_cache = []
 # ---- Live time/date/weather (auto-updating) ----
 time_str = sl.reactive("")
 date_str = sl.reactive("")
+# simulation timing (seconds per tick)
+tick_seconds = sl.reactive(0.05)   # matches asyncio.sleep(0.05)
+# raw NEA wind speed (knots, as provided by API)
+nea_wind_knots = sl.reactive(None)
+nea_wind_kmh = sl.reactive(None)   # what you show in UI
+nea_wind_mps = sl.reactive(None)   # what you use for physics
 weather_str = sl.reactive("Weather: —")
 _last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
@@ -306,9 +328,10 @@ async def _runtime_info_loop():
             parts.append("Temp " + str(round(float(t), 1)) + "°C")
         if isinstance(rh, (int, float)): #relative humidity
             parts.append("RH " + str(round(float(rh), 0)) + "%")
-        if isinstance(ws, (int, float)):
-            ws_kmh = float(ws) * 3.6 #wind speed
-            parts.append("Wind " + str(round(ws_kmh, 1)) + " km/h")
+        ws_knots = nea_wind_knots.value
+        ws_kmh = nea_wind_kmh.value
+        if isinstance(ws_kmh, (int, float)):
+            parts.append("Wind " + str(round(float(ws_kmh), 1)) + " km/h")
         if isinstance(wd, (int, float)): #wind direction
             compass = wind_deg_to_compass(float(wd))
             parts.append("From " + compass + " (" + str(int(wd)) + "°)")
