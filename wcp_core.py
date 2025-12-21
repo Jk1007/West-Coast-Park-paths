@@ -1,5 +1,5 @@
 # wcp_solara_test.py — West Coast Park evac with SCDF responder deployment optimiser
-# Run: C:/Python313/python.exe "c:/HacX! 2025/HacXYES/West Coast Park paths/wcp_solara.py"
+# Run: python wcp_nicegui.py
 
 import plotly.graph_objects as go
 import asyncio
@@ -17,6 +17,105 @@ import re
 import os
 from collections import Counter
 import numpy as np
+import math
+import requests
+
+PARK_LAT = 1.298466
+PARK_LON = 103.762181
+
+def _dist2(lat1, lon1, lat2, lon2):
+    # squared distance in degrees (good enough for "nearest" within SG)
+    dlat = lat1 - lat2
+    dlon = lon1 - lon2
+    return dlat * dlat + dlon * dlon
+
+def _get_nearest_station_id(stations, park_lat, park_lon):
+    best_id = None
+    best_d2 = None
+    for s in stations:
+        loc = s.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            d2 = _dist2(lat, lon, park_lat, park_lon)
+            if best_d2 is None or d2 < best_d2:
+                best_d2 = d2
+                best_id = s.get("id")
+    return best_id
+
+def _get_value_for_station(readings, station_id):
+    for r in readings:
+        if r.get("station_id") == station_id:
+            return r.get("value")
+    return None
+
+def pull_nea_realtime_weather_into_sim():
+    base = "https://api-open.data.gov.sg/v2/real-time/api/"
+
+    # temperature
+    t_json = requests.get(base + "air-temperature", timeout=4).json()
+    t_data = t_json.get("data") or {}
+    t_stations = t_data.get("stations") or []
+    t_readings = t_data.get("readings") or []
+    sid = _get_nearest_station_id(t_stations, PARK_LAT, PARK_LON)
+    t_val = _get_value_for_station(t_readings, sid)
+
+    # humidity
+    h_json = requests.get(base + "relative-humidity", timeout=4).json()
+    h_data = h_json.get("data") or {}
+    h_stations = h_data.get("stations") or []
+    h_readings = h_data.get("readings") or []
+    sid_h = _get_nearest_station_id(h_stations, PARK_LAT, PARK_LON)
+    h_val = _get_value_for_station(h_readings, sid_h)
+
+    # wind speed
+    ws_json = requests.get(base + "wind-speed", timeout=4).json()
+    ws_data = ws_json.get("data") or {}
+    ws_stations = ws_data.get("stations") or []
+    ws_readings = ws_data.get("readings") or []
+    sid_ws = _get_nearest_station_id(ws_stations, PARK_LAT, PARK_LON)
+    ws_val = _get_value_for_station(ws_readings, sid_ws)
+
+    # wind direction
+    wd_json = requests.get(base + "wind-direction", timeout=4).json()
+    wd_data = wd_json.get("data") or {}
+    wd_stations = wd_data.get("stations") or []
+    wd_readings = wd_data.get("readings") or []
+    sid_wd = _get_nearest_station_id(wd_stations, PARK_LAT, PARK_LON)
+    wd_val = _get_value_for_station(wd_readings, sid_wd)
+
+    # now apply into your reactive sim vars (adjust names to yours)
+    if isinstance(ws_val, (int, float)):
+        wind_speed.value = float(ws_val)
+    if isinstance(wd_val, (int, float)):
+        wind_deg.value = float(wd_val)
+
+    # if you have temp/rh reactives too, set them here
+    # if isinstance(t_val, (int, float)): temperature.value = float(t_val)
+    # if isinstance(h_val, (int, float)): humidity.value = float(h_val)
+
+    return t_val, h_val, ws_val, wd_val
+
+def pull_two_hr_forecast():
+    url = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
+    j = requests.get(url, timeout=4).json()
+    data = j.get("data") or {}
+    items = data.get("items") or []
+    if len(items) == 0:
+        return None
+
+    forecasts = items[0].get("forecasts") or []
+    # simplest: pick "West" if it exists
+    for f in forecasts:
+        if (f.get("area") or "").lower() == "west":
+            return f.get("forecast")
+
+    # else just return first (or implement nearest-area if coords are provided)
+    if len(forecasts) > 0:
+        return forecasts[0].get("forecast")
+    return None
+
+
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
@@ -125,48 +224,17 @@ def _notify(msg, timeout=1500):
     ui_message.value = msg
 
 # -------------------- Weather fetch (stdlib-only) --------------------
-def _map_center_latlon():
-    if NODE_POS.size and IS_GEOGRAPHIC:
-        cx = float((X_MIN + X_MAX) * 0.5)  # lon
-        cy = float((Y_MIN + Y_MAX) * 0.5)  # lat
-        return cy, cx
-    return 1.2926, 103.7635
-
-def _fetch_weather_now():
-    lat, lon = _map_center_latlon()
-    query = {
-        "latitude": f"{lat:.5f}",
-        "longitude": f"{lon:.5f}",
-        "current": "temperature_2m,relative_humidity_2m,wind_speed_10m",
-        "timezone": "auto",
-    }
-    url = "https://api.open-meteo.com/v1/forecast?" + parse.urlencode(query)
-    try:
-        with request.urlopen(url, timeout=4) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        cur = data.get("current") or {}
-        t = cur.get("temperature_2m")
-        rh = cur.get("relative_humidity_2m")
-        ws = cur.get("wind_speed_10m")
-        parts = []
-        if isinstance(t, (int, float)): parts.append(f"{t:.1f}°C")
-        if isinstance(rh, (int, float)): parts.append(f"RH {int(round(rh))}%")
-        if isinstance(ws, (int, float)): parts.append(f"Wind {ws:.1f} m/s")
-        weather_str.value = ", ".join(parts) if parts else "Weather: unavailable"
-        _last_weather_ts.value = datetime.now().timestamp()
-    except Exception:
-        if not (weather_str.value or "").strip():
-            weather_str.value = "Weather: unavailable"
-
 async def _runtime_info_loop():
-    _fetch_weather_now()
     while True:
         now = datetime.now()
         time_str.value = now.strftime("%H:%M:%S")
         date_str.value = now.strftime("%A, %d %B %Y")
         if (now.timestamp() - float(_last_weather_ts.value or 0.0)) > 300.0:
-            _fetch_weather_now()
-        await asyncio.sleep(1.0)
+            pull_nea_realtime_weather_into_sim()
+            _last_weather_ts.value = now.timestamp()
+        forecast = pull_two_hr_forecast()
+        if forecast:
+            weather_str.value = "Forecast: " + str(forecast)
 
 # -------------------- HELPERS --------------------
 def _nx_path(u_node, v_node):
@@ -1642,6 +1710,8 @@ def Page():
 
 page = Page
 reset_model()
+# Pull NEA real-time weather ONCE at startup
+pull_nea_realtime_weather_into_sim()
 _recompute_safe_nodes()
 _recompute_featured_safe()
 
