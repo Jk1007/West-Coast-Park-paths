@@ -18,6 +18,9 @@ PARK_LON = 103.762181
 weather_now_str = sl.reactive("—")
 forecast_2h_str = sl.reactive("—")
 forecast_24h_str = sl.reactive("—")
+wind_speed_mps = sl.reactive(None)
+wind_to_deg_math = sl.reactive(None)
+
 
 # Raw values (if core wants them)
 temperature_c = sl.reactive(None)
@@ -101,6 +104,23 @@ def pull_realtime_weather():
         nea_wind_kmh.value = None
 
     nea_wind_from_deg.value = wd
+
+        # speed: km/h -> m/s
+    if isinstance(nea_wind_kmh.value, (int, float)):
+        wind_speed_mps.value = float(nea_wind_kmh.value) / 3.6
+    else:
+        wind_speed_mps.value = None
+
+    # direction:
+    # NEA/myENV direction is "FROM degrees" (meteorological, 0=N, clockwise)
+    # Your sim drift uses a math-style "TO degrees" (what you already had working).
+    if isinstance(nea_wind_from_deg.value, (int, float)):
+        wd_from = float(nea_wind_from_deg.value) % 360.0
+        wd_to = (wd_from + 180.0) % 360.0          # convert FROM -> TO
+        wind_to_deg_math.value = (90.0 - wd_to) % 360.0  # TO-bearings -> math degrees
+    else:
+        wind_to_deg_math.value = None
+
 
     # Build "Now" string
     parts = []

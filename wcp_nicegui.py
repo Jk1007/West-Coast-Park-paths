@@ -15,6 +15,8 @@ import wcp_weather as weather
 import numpy as np
 import asyncio
 import wcp_core as core
+from wcp_core import time_str, date_str
+
 
 
 
@@ -340,3 +342,4 @@ if __name__ == '__main__':
         port=8080,
         reload=False,
     )
+asyncio.create_task(core.time_date_loop())

@@ -22,9 +22,25 @@ import requests
 from wcp_weather import (
     temperature_c,
     relative_humidity_pct,
-    nea_wind_kmh,
-    nea_wind_from_deg,
+    wind_speed_mps,
+    wind_to_deg_math,
+    # (keep your other weather strings if you use them here)
 )
+from wcp_weather import weather_now_str, forecast_2h_str, forecast_24h_str
+time_str = sl.reactive("—")
+date_str = sl.reactive("—")
+# Alias names expected by existing sim code:
+wind_speed = wind_speed_mps      # m/s
+wind_deg = wind_to_deg_math      # degrees for your math drift
+
+async def time_date_loop():
+    while True:
+        now = datetime.now()
+        time_str.value = now.strftime("%H:%M:%S")
+        date_str.value = now.strftime("%d %b %Y")
+        await sl.sleep(1)
+
+
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
 G = ox.load_graphml(GRAPH_FILE)
@@ -104,18 +120,6 @@ risk_speed_mps = sl.reactive(1.4)
 qc_summary = sl.reactive("")
 qc_issues  = sl.reactive("")
 qc_rows_cache = []
-
-# ---- Live time/date/weather (auto-updating) ----
-time_str = sl.reactive("")
-date_str = sl.reactive("")
-# simulation timing (seconds per tick)
-tick_seconds = sl.reactive(0.05)   # matches asyncio.sleep(0.05)
-# raw NEA wind speed (knots, as provided by API)
-nea_wind_knots = sl.reactive(None)
-nea_wind_kmh = sl.reactive(None)   # what you show in UI
-nea_wind_mps = sl.reactive(None)   # what you use for physics
-nea_wind_from_deg = sl.reactive(None)  # NEA / myENV convention (FROM North, clockwise)
-_runtime_loop_started = sl.reactive(False)
 
 # --- Evacuation timing metrics ---
 EVAC_NOTIFICATION_TICK = sl.reactive(None)  # record when hazard notified
@@ -1083,7 +1087,8 @@ def Controls():
     risk_speed_s, set_risk_speed_s = sl.use_state(f"{float(risk_speed_mps.value):.2f}")
     responders_s, set_responders_s = sl.use_state(str(int(N_RESPONDERS.value)))
     metrics_text, set_metrics_text = sl.use_state("")
-
+    wind_deg_s, set_wind_deg_s = sl.use_state("")
+    wind_speed_s, set_wind_speed_s = sl.use_state("")
     # ---------- sim controls ----------
     def on_step(): _step_once()
     async def loop_runner():
@@ -1096,9 +1101,6 @@ def Controls():
             asyncio.get_event_loop().create_task(loop_runner())
         else:
             running.value = False
-    if not _runtime_loop_started.value:
-        _runtime_loop_started.value = True
-        asyncio.get_event_loop().create_task(_runtime_info_loop())
 
     # ---------- APPLY / QC handlers ----------
     def on_apply_parameters():
@@ -1325,10 +1327,13 @@ def Controls():
         sl.Button("RESET", on_click=on_reset)
         sl.Markdown(f"**Tick:** {int(tick.value)}")
 
-    with sl.Row():
-        sl.Markdown(f"**Local time:** {time_str.value or '-'}")
-        sl.Markdown(f"**Date:** {date_str.value or '-'}")
-        sl.Markdown(f"**Weather:** {weather_str.value or '—'}")
+    with sl.Column():
+        sl.Markdown("**Local time:** " + str(time_str.value or "—"))
+        sl.Markdown("**Date:** " + str(date_str.value or "—"))
+        sl.Markdown("**Now:** " + str(weather_now_str.value or "—"))
+        sl.Markdown("**Next 2 hours:** " + str(forecast_2h_str.value or "—"))
+        sl.Markdown("**Next 24 hours:** " + str(forecast_24h_str.value or "—"))
+
 
     sl.Markdown("**Incidents (Hazards):** Add multiple or remove by ID")
     with sl.Row():
