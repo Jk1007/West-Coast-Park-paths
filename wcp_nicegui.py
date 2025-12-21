@@ -10,7 +10,8 @@ from wcp_core import (  # imports simulation + chart
     _suggest_responders, _point_from_phrase, kpi_eta_summary,
     _totals_now, park_chart, EVAC_NOTIFICATION_TICK)
 
-from wcp_core import weather_now_str, forecast_2h_str, forecast_24h_str, weather_str, time_str, date_str, wind_speed, wind_deg, temperature_c, relative_humidity_pct
+from wcp_weather import weather_now_str, forecast_2h_str, forecast_24h_str
+import wcp_weather as weather
 import numpy as np
 import asyncio
 import wcp_core as core
@@ -318,7 +319,7 @@ with ui.row().classes('w-full h-screen'):
             if _started_weather:
                 return
             _started_weather = True
-            asyncio.create_task(core._runtime_info_loop())
+            asyncio.create_task(weather.weather_loop())
 
         ui.timer(1.0, start_weather_once, once=True)
 

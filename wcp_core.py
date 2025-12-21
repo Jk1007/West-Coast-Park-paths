@@ -19,232 +19,12 @@ from collections import Counter
 import numpy as np
 import math
 import requests
-
-PARK_LAT = 1.298466
-PARK_LON = 103.762181
-
-def _dist2(lat1, lon1, lat2, lon2):
-    # squared distance in degrees (good enough for "nearest" within SG)
-    dlat = lat1 - lat2
-    dlon = lon1 - lon2
-    return dlat * dlat + dlon * dlon
-
-def _get_nearest_station_id(stations, park_lat, park_lon):
-    best_id = None
-    best_d2 = None
-    for s in stations:
-        loc = s.get("location") or {}
-        lat = loc.get("latitude")
-        lon = loc.get("longitude")
-        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-            d2 = _dist2(lat, lon, park_lat, park_lon)
-            if best_d2 is None or d2 < best_d2:
-                best_d2 = d2
-                best_id = s.get("id")
-    return best_id
-
-def _get_value_for_station(readings, station_id):
-    # NEA v2 format:
-    # readings = [{"timestamp": "...", "data": [{"stationId": "S50", "value": 25.1}, ...]}]
-    if not readings:
-        return None
-
-    first = readings[0]
-    data_list = first.get("data") or []
-
-    for item in data_list:
-        if item.get("stationId") == station_id:
-            return item.get("value")
-
-    return None
-
-def _station_id_to_name(stations):
-    m = {}
-    for s in stations:
-        sid = s.get("id")
-        name = s.get("name")
-        if sid and name:
-            m[sid] = name
-    return m
-
-def pull_nea_realtime_weather_into_sim():
-    base = "https://api-open.data.gov.sg/v2/real-time/api/"
-
-    # temperature
-    t_json = requests.get(base + "air-temperature", timeout=4).json()
-    t_data = t_json.get("data") or {}
-    t_stations = t_data.get("stations") or []
-    t_readings = t_data.get("readings") or []
-    t_map = _station_id_to_name(t_stations)
-    sid_t = _get_nearest_station_id(t_stations, PARK_LAT, PARK_LON)
-    t_val = _get_value_for_station(t_readings, sid_t)
-
-    # humidity
-    h_json = requests.get(base + "relative-humidity", timeout=4).json()
-    h_data = h_json.get("data") or {}
-    h_stations = h_data.get("stations") or []
-    h_readings = h_data.get("readings") or []
-    h_map = _station_id_to_name(h_stations)
-    sid_h = _get_nearest_station_id(h_stations, PARK_LAT, PARK_LON)
-    h_val = _get_value_for_station(h_readings, sid_h)
-
-    # wind speed
-    ws_json = requests.get(base + "wind-speed", timeout=4).json()
-    ws_data = ws_json.get("data") or {}
-    ws_stations = ws_data.get("stations") or []
-    ws_readings = ws_data.get("readings") or []
-    ws_map = _station_id_to_name(ws_stations)
-    sid_ws = _get_nearest_station_id(ws_stations, PARK_LAT, PARK_LON)
-    ws_val = _get_value_for_station(ws_readings, sid_ws)
-
-    # wind direction
-    wd_json = requests.get(base + "wind-direction", timeout=4).json()
-    wd_data = wd_json.get("data") or {}
-    wd_stations = wd_data.get("stations") or []
-    wd_readings = wd_data.get("readings") or []
-    wd_map = _station_id_to_name(wd_stations)
-    sid_wd = _get_nearest_station_id(wd_stations, PARK_LAT, PARK_LON)
-    wd_val = _get_value_for_station(wd_readings, sid_wd)
-   
-
-
-    # apply into reactive sim vars
-    if isinstance(ws_val, (int, float)):
-        unit = (ws_data.get("readingUnit") or "").strip().lower()
-
-        # --- compute km/h for display (no if/else) ---
-        kmh_mult = (unit == "knots") * 1.852 + (unit == "m/s") * 3.6 + (unit == "km/h") * 1.0
-        nea_wind_kmh.value = float(ws_val) * float(kmh_mult)
-
-        # --- compute m/s for physics (no if/else) ---
-        mps_mult = (unit == "knots") * 0.514444 + (unit == "m/s") * 1.0 + (unit == "km/h") * (1.0 / 3.6)
-        nea_wind_mps.value = float(ws_val) * float(mps_mult)
-
-        # your sim uses meters-per-tick
-        wind_speed.value = float(nea_wind_mps.value) * float(tick_seconds.value)
-
-    if isinstance(wd_val, (int, float)):
-        nea = float(wd_val)                      # NEA: FROM North, clockwise
-        nea_wind_from_deg.value = nea            # UI should show this
-
-        # For physics: we need the direction the wind BLOWS TOWARDS
-        to_deg = (nea + 180.0) % 360.0           # still North-based, clockwise
-
-        # Convert North-based clockwise to your sim's math angle (0=East, CCW)
-        sim_deg = (90.0 - to_deg) % 360.0
-        wind_deg.value = sim_deg
-
-
-    if isinstance(t_val, (int, float)):
-        temperature_c.value = float(t_val)
-    if isinstance(h_val, (int, float)):
-        relative_humidity_pct.value = float(h_val)
-
-    # store station names (optional but useful)
-    nea_station_temp.value = str(t_map.get(sid_t, ""))
-    nea_station_rh.value = str(h_map.get(sid_h, ""))
-    nea_station_ws.value = str(ws_map.get(sid_ws, ""))
-    nea_station_wd.value = str(wd_map.get(sid_wd, ""))
-
-    #for testing if values even show and find nearest station
-    print("NEA nearest values:", t_val, h_val, ws_val, wd_val)
-    print("WS raw:", ws_val, "Station taking values from:", nea_station_ws.value)
-    print("WS unit:", ws_data.get("readingUnit"), "raw:", ws_val, "=> km/h:", nea_wind_kmh.value)
-    print("WD NEA(from):", nea_wind_from_deg.value, "sim_deg(to, math):", wind_deg.value)
-    return t_val, h_val, ws_val, wd_val
-
-def wind_deg_to_compass(deg):
-    dirs = [
-        "North", "North-East", "East", "South-East",
-        "South", "South-West", "West", "North-West"
-    ]
-    if deg is None:
-        return None
-    idx = int((deg + 22.5) // 45) % 8
-    return dirs[idx]
-
-def _fmt_ampm(dt_obj):
-    # "6:30pm" style
-    s = dt_obj.strftime("%I:%M%p").lower()
-    if s.startswith("0"):
-        s = s[1:]
-    return s
-
-def _parse_iso(ts):
-    # Handles "2025-12-21T18:30:00+08:00" and "2025-12-21T18:30:00"
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-def pull_two_hr_forecast_detail():
-    url = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
-    j = requests.get(url, timeout=4).json()
-    data = j.get("data") or {}
-    items = data.get("items") or []
-    if len(items) == 0:
-        return None
-
-    item0 = items[0]
-
-    # timestamps
-    valid_period = item0.get("valid_period") or {}
-    start_ts = valid_period.get("start")
-    end_ts = valid_period.get("end")
-    upd_ts = item0.get("update_timestamp") or item0.get("timestamp")
-
-    start_dt = _parse_iso(start_ts)
-    end_dt = _parse_iso(end_ts)
-    upd_dt = _parse_iso(upd_ts)
-
-    # area forecasts
-    forecasts = item0.get("forecasts") or []
-
-    # pick "West" if it exists (same as your old logic)
-    fc = None
-    for f in forecasts:
-        if (f.get("area") or "").lower() == "west":
-            fc = f.get("forecast")
-            break
-    if fc is None and len(forecasts) > 0:
-        fc = forecasts[0].get("forecast")
-
-    out = {}
-    out["forecast"] = fc
-    out["start_dt"] = start_dt
-    out["end_dt"] = end_dt
-    out["updated_dt"] = upd_dt
-    return out
-
-def pull_24hr_forecast_summary():
-    url = "https://api.data.gov.sg/v1/environment/24-hour-weather-forecast"
-    j = requests.get(url, timeout=6).json()
-
-    items = j.get("items") or []
-    if len(items) == 0:
-        return None
-
-    item0 = items[0]
-    general = item0.get("general") or {}
-
-    temp = general.get("temperature") or {}
-    rh = general.get("relative_humidity") or {}
-    wind = general.get("wind") or {}
-    wind_speed = wind.get("speed") or {}
-
-    out = {}
-    out["forecast"] = general.get("forecast")
-    out["temp_low"] = temp.get("low")
-    out["temp_high"] = temp.get("high")
-    out["rh_low"] = rh.get("low")
-    out["rh_high"] = rh.get("high")
-    out["wind_low"] = wind_speed.get("low")
-    out["wind_high"] = wind_speed.get("high")
-    out["wind_dir"] = wind.get("direction")
-    return out
-
+from wcp_weather import (
+    temperature_c,
+    relative_humidity_pct,
+    nea_wind_kmh,
+    nea_wind_from_deg,
+)
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
 GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
 G = ox.load_graphml(GRAPH_FILE)
@@ -299,11 +79,6 @@ hazard_spread = sl.reactive(1.2)      # m/step (actual circle growth)
 expected_growth_m = sl.reactive(3.0)  # m/step
 expected_buffer_m = sl.reactive(0.0)  # m
 
-wind_deg = sl.reactive(45.0)          # 0=E, 90=N
-wind_speed = sl.reactive(1.0)
-temperature_c = sl.reactive(None)
-relative_humidity_pct = sl.reactive(None)
-
 # Optional: store which station was used
 nea_station_temp = sl.reactive("")
 nea_station_rh = sl.reactive("")
@@ -340,11 +115,6 @@ nea_wind_knots = sl.reactive(None)
 nea_wind_kmh = sl.reactive(None)   # what you show in UI
 nea_wind_mps = sl.reactive(None)   # what you use for physics
 nea_wind_from_deg = sl.reactive(None)  # NEA / myENV convention (FROM North, clockwise)
-weather_str = sl.reactive("Weather: —")
-weather_now_str = sl.reactive("—")
-forecast_2h_str = sl.reactive("—")
-forecast_24h_str = sl.reactive("—")
-_last_weather_ts = sl.reactive(0.0)
 _runtime_loop_started = sl.reactive(False)
 
 # --- Evacuation timing metrics ---
@@ -368,119 +138,6 @@ rng = np.random.default_rng(42)
 # -------------------- NOTIFY SHIM --------------------
 def _notify(msg, timeout=1500):
     ui_message.value = msg
-
-# -------------------- Weather fetch (stdlib-only) --------------------
-
-async def _runtime_info_loop():
-    first_run = True
-    while True:
-        now = datetime.now()
-        time_str.value = now.strftime("%H:%M:%S")
-        date_str.value = now.strftime("%A, %d %B %Y")
-
-        
-        # refresh NEA readings immediately on first loop, then every 5 minutes
-        age = now.timestamp() - float(_last_weather_ts.value or 0.0)
-        if first_run or age > 300.0:
-            try:
-                pull_nea_realtime_weather_into_sim()
-            except Exception as e:
-                last_error.value = "NEA pull failed: " + repr(e)
-            _last_weather_ts.value = now.timestamp()
-
-
-        fc2 = None
-        try:
-            fc2 = pull_two_hr_forecast_detail()
-        except Exception as e:
-            last_error.value = "2hr forecast failed: " + repr(e)
-
-        f24 = None
-        try:
-            f24 = pull_24hr_forecast_summary()
-        except Exception as e:
-            last_error.value = "24hr forecast failed: " + repr(e)
-       
-
-       # Current/Now Weather Conditions
-        cur = []
-        t = temperature_c.value
-        rh = relative_humidity_pct.value
-        ws_kmh = nea_wind_kmh.value
-        wd_from = nea_wind_from_deg.value
-
-        if isinstance(t, (int, float)):
-            cur.append("Temp " + str(round(float(t), 1)) + "°C")
-        if isinstance(rh, (int, float)):
-            cur.append("RH " + str(int(round(float(rh), 0))) + "%")
-        if isinstance(ws_kmh, (int, float)):
-            cur.append("Wind " + str(round(float(ws_kmh), 1)) + " km/h")
-        if isinstance(wd_from, (int, float)):
-            compass = wind_deg_to_compass(float(wd_from))
-            if compass:
-                cur.append("From " + compass + " (" + str(int(round(float(wd_from), 0))) + "°)")
-            else:
-                cur.append("From " + str(int(round(float(wd_from), 0))) + "°")
-
-        weather_now_str.value = " | ".join(cur) if cur else "—"
-
-# Next 2 hours prediction 
-        two = []
-        if fc2:
-            sd = fc2.get("start_dt")
-            ed = fc2.get("end_dt")
-            ud = fc2.get("updated_dt")
-            cond = fc2.get("forecast")
-
-            if sd and ed:
-                two.append("Forecast for " + _fmt_ampm(sd) + " - " + _fmt_ampm(ed))
-
-            if ud:
-                now2 = datetime.now(ud.tzinfo) if ud.tzinfo else datetime.now()
-                if ud.date() == now2.date():
-                    two.append("Updated: " + _fmt_ampm(ud) + " today")
-                else:
-                    two.append("Updated: " + _fmt_ampm(ud) + " " + ud.strftime("%d %b"))
-
-            if cond:
-                two.append(str(cond))
-
-        forecast_2h_str.value = " | ".join(two) if two else "—"
-
-# Next 24 hours prediction: 
-
-        day = []
-        if f24:
-            gf = f24.get("forecast")
-            if gf:
-                day.append(str(gf))
-
-            tl = f24.get("temp_low")
-            th = f24.get("temp_high")
-            if tl is not None and th is not None:
-                day.append("Temp " + str(tl) + "–" + str(th) + "°C")
-
-            rhl = f24.get("rh_low")
-            rhh = f24.get("rh_high")
-            if rhl is not None and rhh is not None:
-                day.append("Humidity " + str(rhl) + "–" + str(rhh) + "%")
-
-            wl = f24.get("wind_low")
-            wh = f24.get("wind_high")
-            wdir = f24.get("wind_dir") or ""
-            if wl is not None and wh is not None:
-                s = "Wind " + str(wl) + "–" + str(wh) + " km/h"
-                if wdir:
-                    s = s + " • " + str(wdir)
-                day.append(s)
-
-        forecast_24h_str.value = " | ".join(day) if day else "—"
-
-
-        # IMPORTANT: avoid hot loop
-        await asyncio.sleep(1.0)
-
-
 # -------------------- HELPERS --------------------
 def _nx_path(u_node, v_node):
     try: return nx.shortest_path(UG, u_node, v_node, weight="weight")
@@ -1414,8 +1071,6 @@ def Controls():
     hz_spread_s, set_hz_spread_s = sl.use_state(f"{float(hazard_spread.value):.2f}")
     exp_growth_s, set_exp_growth_s = sl.use_state(f"{float(expected_growth_m.value):.2f}")
     exp_buffer_s, set_exp_buffer_s = sl.use_state(f"{float(expected_buffer_m.value):.1f}")
-    wind_deg_s, set_wind_deg_s = sl.use_state(f"{float(wind_deg.value):.1f}")
-    wind_speed_s, set_wind_speed_s = sl.use_state(f"{float(wind_speed.value):.2f}")
     base_aw_s, set_base_aw_s = sl.use_state(f"{float(base_awareness_lag.value):.1f}")
     plume_show_s, set_plume_show_s = sl.use_state("true" if plume_show.value else "false")
     plume_stab_s, set_plume_stab_s = sl.use_state(plume_stab.value)
@@ -1954,9 +1609,6 @@ def Page():
         sl.FigurePlotly(chart)
 
 page = Page
-# Pull NEA real-time weather ONCE at startup
-pull_nea_realtime_weather_into_sim()
-_last_weather_ts.value = datetime.now().timestamp()
 reset_model()
 _recompute_safe_nodes()
 _recompute_featured_safe()
