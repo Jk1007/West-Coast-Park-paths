@@ -44,10 +44,28 @@ def _get_nearest_station_id(stations, park_lat, park_lon):
     return best_id
 
 def _get_value_for_station(readings, station_id):
-    for r in readings:
-        if r.get("station_id") == station_id:
-            return r.get("value")
+    # NEA v2 format:
+    # readings = [{"timestamp": "...", "data": [{"stationId": "S50", "value": 25.1}, ...]}]
+    if not readings:
+        return None
+
+    first = readings[0]
+    data_list = first.get("data") or []
+
+    for item in data_list:
+        if item.get("stationId") == station_id:
+            return item.get("value")
+
     return None
+
+def _station_id_to_name(stations):
+    m = {}
+    for s in stations:
+        sid = s.get("id")
+        name = s.get("name")
+        if sid and name:
+            m[sid] = name
+    return m
 
 def pull_nea_realtime_weather_into_sim():
     base = "https://api-open.data.gov.sg/v2/real-time/api/"
@@ -57,14 +75,16 @@ def pull_nea_realtime_weather_into_sim():
     t_data = t_json.get("data") or {}
     t_stations = t_data.get("stations") or []
     t_readings = t_data.get("readings") or []
-    sid = _get_nearest_station_id(t_stations, PARK_LAT, PARK_LON)
-    t_val = _get_value_for_station(t_readings, sid)
+    t_map = _station_id_to_name(t_stations)
+    sid_t = _get_nearest_station_id(t_stations, PARK_LAT, PARK_LON)
+    t_val = _get_value_for_station(t_readings, sid_t)
 
     # humidity
     h_json = requests.get(base + "relative-humidity", timeout=4).json()
     h_data = h_json.get("data") or {}
     h_stations = h_data.get("stations") or []
     h_readings = h_data.get("readings") or []
+    h_map = _station_id_to_name(h_stations)
     sid_h = _get_nearest_station_id(h_stations, PARK_LAT, PARK_LON)
     h_val = _get_value_for_station(h_readings, sid_h)
 
@@ -73,6 +93,7 @@ def pull_nea_realtime_weather_into_sim():
     ws_data = ws_json.get("data") or {}
     ws_stations = ws_data.get("stations") or []
     ws_readings = ws_data.get("readings") or []
+    ws_map = _station_id_to_name(ws_stations)
     sid_ws = _get_nearest_station_id(ws_stations, PARK_LAT, PARK_LON)
     ws_val = _get_value_for_station(ws_readings, sid_ws)
 
@@ -81,19 +102,29 @@ def pull_nea_realtime_weather_into_sim():
     wd_data = wd_json.get("data") or {}
     wd_stations = wd_data.get("stations") or []
     wd_readings = wd_data.get("readings") or []
+    wd_map = _station_id_to_name(wd_stations)
     sid_wd = _get_nearest_station_id(wd_stations, PARK_LAT, PARK_LON)
     wd_val = _get_value_for_station(wd_readings, sid_wd)
 
-    # now apply into your reactive sim vars (adjust names to yours)
+    # apply into reactive sim vars
     if isinstance(ws_val, (int, float)):
         wind_speed.value = float(ws_val)
     if isinstance(wd_val, (int, float)):
         wind_deg.value = float(wd_val)
 
-    # if you have temp/rh reactives too, set them here
-    # if isinstance(t_val, (int, float)): temperature.value = float(t_val)
-    # if isinstance(h_val, (int, float)): humidity.value = float(h_val)
+    if isinstance(t_val, (int, float)):
+        temperature_c.value = float(t_val)
+    if isinstance(h_val, (int, float)):
+        relative_humidity_pct.value = float(h_val)
 
+    # store station names (optional but useful)
+    nea_station_temp.value = str(t_map.get(sid_t, ""))
+    nea_station_rh.value = str(h_map.get(sid_h, ""))
+    nea_station_ws.value = str(ws_map.get(sid_ws, ""))
+    nea_station_wd.value = str(wd_map.get(sid_wd, ""))
+
+    #for testing if values even show
+    print("NEA nearest values:", t_val, h_val, ws_val, wd_val)
     return t_val, h_val, ws_val, wd_val
 
 def pull_two_hr_forecast():
@@ -172,7 +203,15 @@ expected_growth_m = sl.reactive(3.0)  # m/step
 expected_buffer_m = sl.reactive(0.0)  # m
 
 wind_deg = sl.reactive(45.0)          # 0=E, 90=N
-wind_speed = sl.reactive(1.0)         # m/s
+wind_speed = sl.reactive(1.0)
+temperature_c = sl.reactive(None)
+relative_humidity_pct = sl.reactive(None)
+
+# Optional: store which station was used
+nea_station_temp = sl.reactive("")
+nea_station_rh = sl.reactive("")
+nea_station_ws = sl.reactive("")
+nea_station_wd = sl.reactive("")       # m/s
 base_awareness_lag = sl.reactive(8.0)
 
 # plume/risk
@@ -224,17 +263,55 @@ def _notify(msg, timeout=1500):
     ui_message.value = msg
 
 # -------------------- Weather fetch (stdlib-only) --------------------
+
 async def _runtime_info_loop():
     while True:
         now = datetime.now()
         time_str.value = now.strftime("%H:%M:%S")
         date_str.value = now.strftime("%A, %d %B %Y")
+
+        # refresh NEA readings every 5 minutes
         if (now.timestamp() - float(_last_weather_ts.value or 0.0)) > 300.0:
-            pull_nea_realtime_weather_into_sim()
+            try:
+                pull_nea_realtime_weather_into_sim()
+            except Exception as e:
+                last_error.value = "NEA pull failed: " + repr(e)
             _last_weather_ts.value = now.timestamp()
-        forecast = pull_two_hr_forecast()
-        if forecast:
-            weather_str.value = "Forecast: " + str(forecast)
+
+        # forecast (UI context)
+        fc = None
+        try:
+            fc = pull_two_hr_forecast()
+        except Exception as e:
+            last_error.value = "Forecast pull failed: " + repr(e)
+
+        # build a single UI string showing everything
+        t = temperature_c.value
+        rh = relative_humidity_pct.value
+        ws = wind_speed.value
+        wd = wind_deg.value
+
+        parts = []
+        if isinstance(t, (int, float)):
+            parts.append("Temp " + str(round(float(t), 1)) + "°C")
+        if isinstance(rh, (int, float)):
+            parts.append("RH " + str(round(float(rh), 0)) + "%")
+        if isinstance(ws, (int, float)):
+            parts.append("Wind " + str(round(float(ws), 2)) + " m/s")
+        if isinstance(wd, (int, float)):
+            parts.append(str(round(float(wd), 0)) + "°")
+
+        if fc:
+            parts.append("Forecast: " + str(fc))
+
+        if parts:
+            weather_str.value = " | ".join(parts)
+        else:
+            weather_str.value = "Weather: —"
+
+        # IMPORTANT: avoid hot loop
+        await asyncio.sleep(1.0)
+
 
 # -------------------- HELPERS --------------------
 def _nx_path(u_node, v_node):
@@ -1709,9 +1786,10 @@ def Page():
         sl.FigurePlotly(chart)
 
 page = Page
-reset_model()
 # Pull NEA real-time weather ONCE at startup
 pull_nea_realtime_weather_into_sim()
+_last_weather_ts.value = datetime.now().timestamp()
+reset_model()
 _recompute_safe_nodes()
 _recompute_featured_safe()
 

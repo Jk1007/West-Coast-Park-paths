@@ -8,12 +8,15 @@ from wcp_core import (  # imports simulation + chart
     reset_model, _recompute_safe_nodes, _recompute_featured_safe,
     _choose_targets_and_paths, _force_evacuation_mode, _optimize_safe_zones_by_eta,
     _suggest_responders, _point_from_phrase, kpi_eta_summary,
-    _totals_now, park_chart, EVAC_NOTIFICATION_TICK,
-)
+    _totals_now, park_chart, EVAC_NOTIFICATION_TICK)
 
-
+from wcp_core import weather_str, time_str, date_str, wind_speed, wind_deg, temperature_c, relative_humidity_pct
 import numpy as np
+import asyncio
+import wcp_core as core
 
+# Start background weather/time updater once
+asyncio.get_event_loop().create_task(core._runtime_info_loop())
 
 # ---------- helpers to keep labels in sync ----------
 
@@ -271,6 +274,10 @@ with ui.row().classes('w-full h-screen'):
 
         ui.separator()
         ui.markdown('### Status')
+        ui.markdown('**Weather (NEA):**')
+        ui.label().bind_text_from(time_str, 'value')
+        ui.label().bind_text_from(date_str, 'value')
+        ui.label().bind_text_from(weather_str, 'value')
         ui.markdown('**Evacuation ETA summary:**')
         ui.label().bind_text_from(eta_label, 'text')
         ui.markdown('**Counts:**')
