@@ -16,6 +16,9 @@ import numpy as np
 import asyncio
 import wcp_core as core
 from wcp_core import time_str, date_str
+# Prevent timer_tick from stepping/redrawing while we mutate hazards/safe zones
+ui_busy = False
+
 
 
 
@@ -164,6 +167,8 @@ with ui.row().classes('w-full h-screen'):
 
 
         def clear_hazards():
+            global ui_busy
+            ui_busy = True
             HAZARDS.clear()
             _recompute_safe_nodes()
             _recompute_featured_safe()
@@ -171,9 +176,12 @@ with ui.row().classes('w-full h-screen'):
             update_labels(status_label, eta_label)
             redraw(plot)
             refresh_hazard_list()
+            ui_busy = False
             ui.notify('All hazards cleared.', type='positive')
 
         def remove_last_hazard():
+            global ui_busy
+            ui_busy = True
             if not HAZARDS:
                 ui.notify('No hazards to remove.', type='warning')
                 return
@@ -185,10 +193,13 @@ with ui.row().classes('w-full h-screen'):
             update_labels(status_label, eta_label)
             redraw(plot)
             refresh_hazard_list()
+            ui_busy = False
             ui.notify(f'Removed last hazard (ID {hid}).', type='positive')
 
         
         def remove_selected_hazard():
+            global ui_busy
+            ui_busy = True
             if not hazard_select.value:
                 ui.notify('No hazard selected.', type='warning')
                 return
@@ -209,6 +220,7 @@ with ui.row().classes('w-full h-screen'):
             update_labels(status_label, eta_label)
             redraw(plot)
             refresh_hazard_list()
+            ui_busy = False
             ui.notify(f'Removed hazard ID {target_id}.', type='positive')
 
         with ui.row().classes('w-full gap-2'):
@@ -310,23 +322,70 @@ with ui.row().classes('w-full h-screen'):
         update_labels(status_label, eta_label)
 
         # Timer: continuous sim while running.value is True
-        def timer_tick():
-            try:
-                if running.value:
-                    from wcp_core import _step_once
-                    _step_once()
-                    update_labels(status_label, eta_label)
-                    redraw(plot)
-            except Exception as e:
-                import traceback
-                print('Timer error:', e)
-                traceback.print_exc()
-                running.value = False
-                ui.notify(f'Simulation error, paused: {e}', type='negative')
+        def add_hazard():
+            import wcp_core as core
+            import traceback
+            global ui_busy
 
-        ui.timer(0.2, timer_tick)  # 5 FPS
-        # Start NEA background updater once (script-mode safe)
-        _started_weather = False
+            if ui_busy:
+                ui.notify('Busy updating map, try again in 1s.', type='warning')
+                return
+
+            ui_busy = True
+            was_running = bool(core.running.value)
+            core.running.value = False
+
+            try:
+                phrase = (location_input.value or '').strip()
+                pt = _point_from_phrase(phrase)
+
+                if pt is None:
+                    ui.notify(
+                        'Could not parse location. Try: North, South, East, West, NE/NW/SE/SW, or "160°, 300m".',
+                        type='warning',
+                    )
+                    return
+
+                hx, hy = float(pt[0]), float(pt[1])
+                label = phrase if phrase else '(' + str(round(hx, 0)) + ', ' + str(round(hy, 0)) + ')'
+
+                core.HAZARDS.append({
+                    'id': core.HAZARD_ID,
+                    'pos': np.array([hx, hy], dtype=float),
+                    'origin_pos': np.array([hx, hy], dtype=float),  # keep arrows stable
+                    'r_m': float(max(5.0, hazard_radius.value)),
+                    'label': label,
+                })
+                core.HAZARD_ID += 1
+
+                _recompute_safe_nodes()
+                _recompute_featured_safe()
+                _choose_targets_and_paths()
+
+                EVAC_NOTIFICATION_TICK.value = int(tick.value)
+                for p in PEOPLE:
+                    p['evac_start_tick'] = int(tick.value)
+                    p['evac_end_tick'] = None
+                    p['evac_time_s'] = None
+
+                _force_evacuation_mode()
+
+                update_labels(status_label, eta_label)
+                redraw(plot)
+                refresh_hazard_list()
+
+                ui.notify('Hazard added (ID ' + str(core.HAZARD_ID - 1) + '), agents evacuating.', type='positive')
+
+            except Exception as e:
+                print('Error in add_hazard:', e)
+                traceback.print_exc()
+                ui.notify('Add hazard failed: ' + str(e), type='negative')
+
+            finally:
+                if was_running:
+                    core.running.value = True
+                ui_busy = False
+
 
         def start_weather_once():
             global _started_weather
