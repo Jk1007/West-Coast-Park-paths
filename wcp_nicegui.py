@@ -116,47 +116,52 @@ with ui.row().classes('w-full h-screen'):
                 hazard_select.value = None
 
         def add_hazard():
-            phrase = (location_input.value or '').strip()
-            pt = _point_from_phrase(phrase)
-            if pt is None:
-                ui.notify(
-                    'Could not parse location. Try: North, South, East, West, NE, NW, SE, SW, or "160°, 300m".',
-                    type='warning',
-                )
-                return
-
-            
-            # NOTE: because we imported HAZARD_ID by value, we use the module directly
             import wcp_core as core
 
-              # build a user-friendly label: use phrase, fallback to coords
-            hx, hy = float(pt[0]), float(pt[1])
-            label = phrase if phrase else f"({hx:.0f}, {hy:.0f})"
+            was_running = bool(core.running.value)
+            core.running.value = False
 
-            core.HAZARDS.append({
-                'id': core.HAZARD_ID,
-                'pos': np.array([hx, hy], dtype=float),
-                'r_m': float(max(5.0, hazard_radius.value)),
-                'label': label,  # <-- this stores the "where"
-            })
-            core.HAZARD_ID += 1
+            try:
+                phrase = (location_input.value or '').strip()
+                pt = _point_from_phrase(phrase)
+                if pt is None:
+                    ui.notify(
+                        'Could not parse location. Try: North, South, East, West, NE, NW, SE, SW, or "160°, 300m".',
+                        type='warning',
+                    )
+                    return
 
-            _recompute_safe_nodes()
-            _recompute_featured_safe()
-            _choose_targets_and_paths()
+                hx, hy = float(pt[0]), float(pt[1])
+                label = phrase if phrase else "(" + str(round(hx, 0)) + ", " + str(round(hy, 0)) + ")"
 
-            # everyone starts evacuating once hazard declared
-            EVAC_NOTIFICATION_TICK.value = int(tick.value)
-            for p in PEOPLE:
-                p['evac_start_tick'] = int(tick.value)
-                p['evac_end_tick'] = None
-                p['evac_time_s'] = None
-            _force_evacuation_mode()
+                core.HAZARDS.append({
+                    'id': core.HAZARD_ID,
+                    'pos': np.array([hx, hy], dtype=float),
+                    'r_m': float(max(5.0, hazard_radius.value)),
+                    'label': label,
+                })
+                core.HAZARD_ID += 1
 
-            update_labels(status_label, eta_label)
-            redraw(plot)
-            refresh_hazard_list()
-            ui.notify('Hazard added, agents evacuating.', type='positive')
+                _recompute_safe_nodes()
+                _recompute_featured_safe()
+                _choose_targets_and_paths()
+
+                EVAC_NOTIFICATION_TICK.value = int(tick.value)
+                for p in PEOPLE:
+                    p['evac_start_tick'] = int(tick.value)
+                    p['evac_end_tick'] = None
+                    p['evac_time_s'] = None
+                _force_evacuation_mode()
+
+                update_labels(status_label, eta_label)
+                redraw(plot)
+                refresh_hazard_list()
+                ui.notify('Hazard added, agents evacuating.', type='positive')
+
+            finally:
+                if was_running:
+                    core.running.value = True
+
 
         def clear_hazards():
             HAZARDS.clear()

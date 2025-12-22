@@ -163,7 +163,7 @@ def _unit(v):
 def _nearest_hazard_m(pt):
     if not HAZARDS: return None, float("inf")
     best, bestd = None, float("inf")
-    for h in HAZARDS:
+    for h in list(HAZARDS):
         d_m = map_distance_m(pt, h["pos"])
         if d_m < bestd: best, bestd = h, d_m
     return best, bestd
@@ -413,7 +413,7 @@ def _advance_hazards():
     # dx = meters_to_dx(wind_m_per_tick * math.cos(a))
     # dy = meters_to_dy(wind_m_per_tick * math.sin(a))
     dr_m = float(hazard_spread.value)
-    for h in HAZARDS:
+    for h in list(HAZARDS):
         # h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
         h["r_m"] = float(h["r_m"] + dr_m)
     _recompute_safe_nodes()
@@ -1250,33 +1250,41 @@ def Controls():
         _notify("Hazards cleared.")
 
     def on_submit_location():
-        txt = (incident_where_s or "").strip()
-        pt = _point_from_phrase(txt)
-        if pt is None:
-            _notify("Could not parse location. Try: North, South, East, West, North West, NE, Center")
-            return
-        global HAZARD_ID
-        HAZARDS.append({
-            "id": HAZARD_ID,
-            "pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
-            "origin_pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
-            "r_m": float(max(5.0, hazard_radius.value)),
-        })
-        HAZARD_ID += 1
+        was_running = bool(running.value)
+        running.value = False
+        try:
+            txt = (incident_where_s or "").strip()
+            pt = _point_from_phrase(txt)
+            if pt is None:
+                _notify("Could not parse location. Try: NNE 500m, WSW 120m, North West, 160° 300m, Center")
+                return
 
-        _recompute_safe_nodes()
-        _recompute_featured_safe()
-        _choose_targets_and_paths()
+            global HAZARD_ID
+            HAZARDS.append({
+                "id": HAZARD_ID,
+                "pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
+                "origin_pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
+                "r_m": float(max(5.0, hazard_radius.value)),
+            })
+            HAZARD_ID += 1
 
-        EVAC_NOTIFICATION_TICK.value = int(tick.value)
-        for p in PEOPLE:
-            p["evac_start_tick"] = int(tick.value)
-            p["evac_end_tick"] = None
-            p["evac_time_s"] = None
+            _recompute_safe_nodes()
+            _recompute_featured_safe()
+            _choose_targets_and_paths()
 
-        _force_evacuation_mode()
-        tick.value += 1
-        _notify("Hazard added — all agents evacuating now.")
+            EVAC_NOTIFICATION_TICK.value = int(tick.value)
+            for p in PEOPLE:
+                p["evac_start_tick"] = int(tick.value)
+                p["evac_end_tick"] = None
+                p["evac_time_s"] = None
+
+            _force_evacuation_mode()
+            tick.value += 1
+            _notify("Hazard added — all agents evacuating now.")
+        finally:
+            if was_running:
+                running.value = True
+
 
     def on_remove_by_id():
         txt = (remove_id_s or "").strip()
@@ -1562,7 +1570,7 @@ def park_chart():
 
         shapes = []
         hx_list, hy_list = [], []
-        for h in HAZARDS:
+        for h in list(HAZARDS):
             cx, cy = float(h["pos"][0]), float(h["pos"][1])
             r_m = float(max(h["r_m"], 5.0))
             rx = meters_to_dx(r_m); ry = meters_to_dy(r_m)
@@ -1607,7 +1615,7 @@ def park_chart():
         safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
 
         if HAZARDS and safe_pool:
-            for h in HAZARDS:
+            for h in list(HAZARDS):
                 # Use origin_pos if available (for static arrow start), else current pos
                 origin = h.get("origin_pos", h["pos"])
                 hx = float(origin[0])
