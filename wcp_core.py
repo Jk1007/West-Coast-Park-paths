@@ -193,6 +193,7 @@ def _point_from_phrase(phrase: str):
     p = p.replace("top right","north east").replace("top left","north west")
     p = p.replace("bottom right","south east").replace("bottom left","south west")
     p = p.replace("centre","center")
+    p = p.replace(",", " ").replace("(", " ").replace(")", " ")
 
     xmin, ymin = float(X_MIN), float(Y_MIN)
     xmax, ymax = float(X_MAX), float(Y_MAX)
@@ -200,6 +201,45 @@ def _point_from_phrase(phrase: str):
     dy = ymax - ymin
     cx = xmin + dx * 0.5
     cy = ymin + dy * 0.5
+
+    # --- 16-wind shortforms (NNE/ENE/...) optionally with distance like "NNE 300m" ---
+    m_dir = re.match(r'^\s*([nesw]{1,3})\b', p)
+    if m_dir:
+        token = (m_dir.group(1) or "").lower()
+
+        bearing = None
+
+        if token == "n": bearing = 0.0
+        if token == "nne": bearing = 22.5
+        if token == "ne": bearing = 45.0
+        if token == "ene": bearing = 67.5
+        if token == "e": bearing = 90.0
+        if token == "ese": bearing = 112.5
+        if token == "se": bearing = 135.0
+        if token == "sse": bearing = 157.5
+        if token == "s": bearing = 180.0
+        if token == "ssw": bearing = 202.5
+        if token == "sw": bearing = 225.0
+        if token == "wsw": bearing = 247.5
+        if token == "w": bearing = 270.0
+        if token == "wnw": bearing = 292.5
+        if token == "nw": bearing = 315.0
+        if token == "nnw": bearing = 337.5
+
+        if isinstance(bearing, (int, float)):
+            m_dist2 = re.search(r'(\d+(?:\.\d+)?)\s*(?:m|meter|meters|metre|metres)\b', p)
+            r_m = 300.0
+            if m_dist2:
+                try:
+                    r_m = float(m_dist2.group(1))
+                except Exception:
+                    r_m = 300.0
+
+            rad = math.radians(float(bearing))
+            x = cx + r_m * math.sin(rad)
+            y = cy + r_m * math.cos(rad)
+            return np.array([float(x), float(y)], dtype=float)
+
 
     m_deg = re.search(r'(-?\d+(?:\.\d+)?)\s*(?:deg|degrees|°)?', p)
     m_dist = re.search(r'(\d+(?:\.\d+)?)\s*(?:m|meter|meters|metre|metres)\b', p)

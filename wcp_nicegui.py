@@ -85,6 +85,8 @@ with ui.row().classes('w-full h-screen'):
             'Where is the incident?',
             placeholder='e.g. North, NE, 160°, 225°, 300m from center',
         ).classes('w-full')
+        location_input.on('keydown.enter', lambda e: add_hazard())
+
 
                 # list all hazards by ID and description (where)
         hazard_select = ui.select({},
