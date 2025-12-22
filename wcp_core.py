@@ -19,6 +19,7 @@ from collections import Counter
 import numpy as np
 import math
 import requests
+import wcp_arrows_vis
 from wcp_weather import (
     temperature_c,
     relative_humidity_pct,
@@ -1558,7 +1559,34 @@ def park_chart():
             marker=dict(size=14, color="rgb(0,180,0)", symbol="circle-open"),
             name="Featured safe zones", hoverinfo="skip", showlegend=True,
             visible=True if sx_fg else False
-        ))
+        )) 
+
+        # --- Evacuation recommendation arrows: hazard -> nearest safe zone ---
+        arrow_pairs = []
+        if HAZARDS and SAFE_NODES:
+            for h in HAZARDS:
+                hx = float(h["pos"][0])
+                hy = float(h["pos"][1])
+
+                # nearest graph node to hazard
+                _, h_node = _nearest_node_idx(hx, hy)
+
+                # pick nearest safe node by shortest path length on the graph
+                best_safe = None
+                best_len = None
+                for s_node in SAFE_NODES:
+                    d = _nx_path_length(h_node, s_node)
+                    if best_len is None or d < best_len:
+                        best_len = d
+                        best_safe = s_node
+
+                if best_safe is not None and np.isfinite(best_len):
+                    sx, sy = POS_DICT[best_safe]
+                    arrow_pairs.append(((hx, hy), (float(sx), float(sy))))
+
+        if arrow_pairs:
+            wcp_arrows_vis.draw_evac_arrows(fig, arrow_pairs)
+
 
         px, py = ([], [])
         if qc_show_paths.value:
