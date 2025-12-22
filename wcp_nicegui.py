@@ -278,17 +278,22 @@ with ui.row().classes('w-full h-screen'):
         ui.separator()
         ui.markdown('### Status')
         ui.markdown('**Weather (NEA)**')
+
         with ui.grid(columns=2).classes('w-full gap-2'):
-            ui.label('Now').classes('font-bold')
+            ui.label('Now')
             ui.label().bind_text_from(weather_now_str, 'value')
 
-            ui.label('Next 2 hours').classes('font-bold')
+            ui.label('Next 2 hours')
             ui.label().bind_text_from(forecast_2h_str, 'value')
 
-            ui.label('Next 24 hours').classes('font-bold')
+            ui.label('Next 24 hours')
             ui.label().bind_text_from(forecast_24h_str, 'value')
+        #checking for error
+        ui.label().bind_text_from(weather.last_error, 'value')
+
         ui.label().bind_text_from(time_str, 'value')
         ui.label().bind_text_from(date_str, 'value')
+
         ui.markdown('**Evacuation ETA summary:**')
         ui.label().bind_text_from(eta_label, 'text')
         ui.markdown('**Counts:**')
@@ -321,9 +326,13 @@ with ui.row().classes('w-full h-screen'):
             if _started_weather:
                 return
             _started_weather = True
+
             asyncio.create_task(weather.weather_loop())
+            asyncio.create_task(core.time_date_loop())
 
         ui.timer(1.0, start_weather_once, once=True)
+
+
 
 
     # ===== RIGHT PANEL – plot =====
@@ -342,4 +351,3 @@ if __name__ == '__main__':
         port=8080,
         reload=False,
     )
-asyncio.create_task(core.time_date_loop())

@@ -5,6 +5,8 @@ import math
 import requests
 from datetime import datetime
 import solara as sl
+import asyncio
+
 
 # -----------------------------
 # Park reference (West Coast Park)
@@ -53,9 +55,12 @@ def _nearest_station_id(stations):
                 best = s.get("id")
     return best
 
-def _reading_for_station(readings, sid):
+def _reading_for_station(readings, station_id):
     for r in readings:
-        if r.get("station_id") == sid:
+        sid = r.get("station_id")
+        if sid is None:
+            sid = r.get("stationId")
+        if sid == station_id:
             return r.get("value")
     return None
 
@@ -74,25 +79,92 @@ def _deg_to_compass(deg):
 def pull_realtime_weather():
     base = "https://api-open.data.gov.sg/v2/real-time/api/"
 
+    def _fetch_data(endpoint):
+        url = base + endpoint
+        r = requests.get(url, timeout=6)
+
+        # show status codes if not 200
+        if r.status_code != 200:
+            last_error.value = "realtime " + endpoint + " status " + str(r.status_code) + " body " + r.text[:120]
+            return None
+
+        j = r.json()
+        d = j.get("data")
+        if d is None:
+            # show top-level keys if "data" missing
+            last_error.value = "realtime " + endpoint + " no data; keys " + str(list(j.keys()))
+            return None
+
+        return d
+
+
     # Temperature
-    tj = requests.get(base + "air-temperature", timeout=4).json().get("data") or {}
-    sid = _nearest_station_id(tj.get("stations") or [])
-    t = _reading_for_station(tj.get("readings") or [], sid)
+    tj = _fetch_data("air-temperature")
+    if tj is None:
+        return
+
+    t_stations = tj.get("stations") or []
+    t_readings = tj.get("readings") or []
+    sid = _nearest_station_id(t_stations)
+
+    if sid is None and len(t_readings) > 0:
+        sid = t_readings[0].get("station_id")
+
+    t = _reading_for_station(t_readings, sid)
+    if t is None and len(t_readings) > 0:
+        t = t_readings[0].get("value")
+
+
 
     # Humidity
-    hj = requests.get(base + "relative-humidity", timeout=4).json().get("data") or {}
-    sid = _nearest_station_id(hj.get("stations") or [])
-    rh = _reading_for_station(hj.get("readings") or [], sid)
+    hj = _fetch_data("relative-humidity")
+    if hj is None:
+        return
+
+    h_stations = hj.get("stations") or []
+    h_readings = hj.get("readings") or []
+    sid = _nearest_station_id(h_stations)
+
+    if sid is None and len(h_readings) > 0:
+        sid = h_readings[0].get("station_id")
+
+    rh = _reading_for_station(h_readings, sid)
+    if rh is None and len(h_readings) > 0:
+        rh = h_readings[0].get("value")
 
     # Wind speed (knots → km/h)
-    wj = requests.get(base + "wind-speed", timeout=4).json().get("data") or {}
-    sid = _nearest_station_id(wj.get("stations") or [])
-    ws_knots = _reading_for_station(wj.get("readings") or [], sid)
+    wj = _fetch_data("wind-speed")
+    if wj is None:
+        return
+
+    ws_stations = wj.get("stations") or []
+    ws_readings = wj.get("readings") or []
+    sid = _nearest_station_id(ws_stations)
+
+    if sid is None and len(ws_readings) > 0:
+        sid = ws_readings[0].get("station_id")
+
+    ws_knots = _reading_for_station(ws_readings, sid)
+    if ws_knots is None and len(ws_readings) > 0:
+        ws_knots = ws_readings[0].get("value")
+
 
     # Wind direction (FROM)
-    dj = requests.get(base + "wind-direction", timeout=4).json().get("data") or {}
-    sid = _nearest_station_id(dj.get("stations") or [])
-    wd = _reading_for_station(dj.get("readings") or [], sid)
+    dj = _fetch_data("wind-direction")
+    if dj is None:
+        return
+    
+    wd_stations = dj.get("stations") or []
+    wd_readings = dj.get("readings") or []
+    sid = _nearest_station_id(wd_stations)
+
+    if sid is None and len(wd_readings) > 0:
+        sid = wd_readings[0].get("station_id")
+
+    wd = _reading_for_station(wd_readings, sid) 
+    if wd is None and len(wd_readings) > 0:
+        wd = wd_readings[0].get("value")
+
 
     # Store raw values
     temperature_c.value = t
@@ -105,11 +177,12 @@ def pull_realtime_weather():
 
     nea_wind_from_deg.value = wd
 
-        # speed: km/h -> m/s
+    # speed: km/h -> m/s
     if isinstance(nea_wind_kmh.value, (int, float)):
         wind_speed_mps.value = float(nea_wind_kmh.value) / 3.6
     else:
         wind_speed_mps.value = None
+
 
     # direction:
     # NEA/myENV direction is "FROM degrees" (meteorological, 0=N, clockwise)
@@ -134,42 +207,87 @@ def pull_realtime_weather():
         parts.append("From " + _deg_to_compass(wd) + " (" + str(int(wd)) + "°)")
 
     weather_now_str.value = " | ".join(parts) if parts else "—"
+    
+
 
 # -----------------------------
 # Next 2 hours
 # -----------------------------
 def pull_2hr_forecast():
     url = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
-    j = requests.get(url, timeout=4).json().get("data") or {}
-    items = j.get("items") or []
+    data = requests.get(url, timeout=6).json().get("data") or {}
+    items = data.get("items") or []
     if not items:
         forecast_2h_str.value = "—"
         return
 
     item = items[0]
-    fc = None
-    for f in item.get("forecasts") or []:
-        if (f.get("area") or "").lower() == "west":
-            fc = f
-            break
+    forecasts = item.get("forecasts") or []
+    meta = item.get("area_metadata") or []
 
-    if not fc:
+    # Build area -> (lat, lon)
+    area_lat = {}
+    area_lon = {}
+    for m in meta:
+        name = (m.get("name") or "").strip().lower()
+        loc = m.get("label_location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if name and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            area_lat[name] = float(lat)
+            area_lon[name] = float(lon)
+
+    # Pick nearest forecast area to West Coast Park (best match)
+    best = None
+    best_d = None
+    for f in forecasts:
+        area = ((f.get("area") or "")).strip().lower()
+        if area in area_lat and area in area_lon:
+            d = _dist2(area_lat[area], area_lon[area], PARK_LAT, PARK_LON)
+            if best_d is None or d < best_d:
+                best_d = d
+                best = f
+
+    if not best and len(forecasts) > 0:
+        best = forecasts[0]
+
+    if not best:
         forecast_2h_str.value = "—"
         return
 
-    sd = item.get("start_period")
-    ed = item.get("end_period")
+    # Format period + updated + forecast text
+    vp = item.get("valid_period") or {}
+    sd = vp.get("start")
+    ed = vp.get("end")
     upd = item.get("update_timestamp")
+    fc_text = best.get("forecast") or "—"
 
     parts = []
+
     if sd and ed:
-        parts.append("Forecast for " + sd[-8:-3] + " - " + ed[-8:-3])
+        sd_dt = datetime.fromisoformat(sd)
+        ed_dt = datetime.fromisoformat(ed)
+
+        sd_txt = sd_dt.strftime("%I:%M%p").lower()
+        ed_txt = ed_dt.strftime("%I:%M%p").lower()
+        if sd_txt.startswith("0"):
+            sd_txt = sd_txt[1:]
+        if ed_txt.startswith("0"):
+            ed_txt = ed_txt[1:]
+
+        parts.append("Forecast for " + sd_txt + " - " + ed_txt)
+
     if upd:
-        parts.append("Updated: " + upd[-8:-3] + " today")
-    if fc.get("forecast"):
-        parts.append(fc.get("forecast"))
+        upd_dt = datetime.fromisoformat(upd)
+        upd_txt = upd_dt.strftime("%I:%M%p").lower()
+        if upd_txt.startswith("0"):
+            upd_txt = upd_txt[1:]
+        parts.append("Updated: " + upd_txt + " today")
+
+    parts.append(fc_text)
 
     forecast_2h_str.value = " | ".join(parts)
+
 
 # -----------------------------
 # Next 24 hours (v1 endpoint)
@@ -203,6 +321,7 @@ def pull_24hr_forecast():
 
     forecast_24h_str.value = " | ".join(parts)
 
+
 # -----------------------------
 # Background loop (called by NiceGUI)
 # -----------------------------
@@ -210,13 +329,32 @@ async def weather_loop():
     first = True
     while True:
         now = datetime.now().timestamp()
+
         if first or (now - _last_weather_ts.value) > 300:
             try:
                 pull_realtime_weather()
-                pull_2hr_forecast()
-                pull_24hr_forecast()
-                _last_weather_ts.value = now
             except Exception as e:
-                last_error.value = str(e)
-        first = False
-        await sl.sleep(1)
+                last_error.value = "realtime: " + repr(e)
+                weather_now_str.value = "—"
+
+
+            try:
+                pull_2hr_forecast()
+            except Exception as e:
+                last_error.value = "2hr: " + repr(e)
+                forecast_2h_str.value = "—"
+
+            try:
+                pull_24hr_forecast()
+            except Exception as e:
+                last_error.value = "24hr: " + repr(e)
+                forecast_24h_str.value = "—"
+
+            _last_weather_ts.value = now
+            first = False
+
+        await asyncio.sleep(1)
+
+            
+
+

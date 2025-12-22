@@ -38,7 +38,9 @@ async def time_date_loop():
         now = datetime.now()
         time_str.value = now.strftime("%H:%M:%S")
         date_str.value = now.strftime("%d %b %Y")
-        await sl.sleep(1)
+        await asyncio.sleep(1)
+
+
 
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
