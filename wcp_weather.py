@@ -104,15 +104,17 @@ def pull_realtime_weather():
         t = None 
     else:
         t_stations = tj.get("stations") or []
-        t_items = tj.get("readings") or []
-        if t_items:
-            t_readings = t_items[0].get("data") or []
+        # V2 API: readings is a list of {timestamp, data: [...]}, we want the first item's data
+        raw_reads = tj.get("readings") or []
+        if raw_reads:
+            t_readings = raw_reads[0].get("data") or []
         else:
             t_readings = []
+
         sid = _nearest_station_id(t_stations)
 
         if sid is None and len(t_readings) > 0:
-            sid = t_readings[0].get("station_id")
+            sid = t_readings[0].get("stationId") or t_readings[0].get("station_id")
 
         t = _reading_for_station(t_readings, sid)
         if t is None and len(t_readings) > 0:
@@ -126,35 +128,35 @@ def pull_realtime_weather():
         hum = None 
     else:
         h_stations = hj.get("stations") or []
-        h_items = hj.get("readings") or []
-        if h_items:
-            h_readings = h_items[0].get("data") or []
+        raw_reads = hj.get("readings") or []
+        if raw_reads:
+            h_readings = raw_reads[0].get("data") or []
         else:
             h_readings = []
         sid = _nearest_station_id(h_stations)
 
         if sid is None and len(h_readings) > 0:
-            sid = h_readings[0].get("station_id")
+            sid = h_readings[0].get("stationId") or h_readings[0].get("station_id")
 
         rh = _reading_for_station(h_readings, sid)
         if rh is None and len(h_readings) > 0:
             rh = h_readings[0].get("value")
 
-    # Wind speed (knots → km/h)
+    # Wind speed (knots -> km/h)
     wj = _fetch_data("wind-speed")
     if wj is None:
         w = None 
     else:
         ws_stations = wj.get("stations") or []
-        ws_items = wj.get("readings") or []
-        if ws_items:
-            ws_readings = ws_items[0].get("data") or []
+        raw_reads = wj.get("readings") or []
+        if raw_reads:
+            ws_readings = raw_reads[0].get("data") or []
         else:
             ws_readings = []
         sid = _nearest_station_id(ws_stations)
 
         if sid is None and len(ws_readings) > 0:
-            sid = ws_readings[0].get("station_id")
+            sid = ws_readings[0].get("stationId") or ws_readings[0].get("station_id")
 
         ws_knots = _reading_for_station(ws_readings, sid)
         if ws_knots is None and len(ws_readings) > 0:
@@ -167,15 +169,15 @@ def pull_realtime_weather():
         d = None
     else:
         wd_stations = dj.get("stations") or []
-        wd_items = dj.get("readings") or []
-        if wd_items:
-            wd_readings = wd_items[0].get("data") or []
+        raw_reads = dj.get("readings") or []
+        if raw_reads:
+            wd_readings = raw_reads[0].get("data") or []
         else:
             wd_readings = []
         sid = _nearest_station_id(wd_stations)
 
         if sid is None and len(wd_readings) > 0:
-            sid = wd_readings[0].get("station_id")
+            sid = wd_readings[0].get("stationId") or wd_readings[0].get("station_id")
 
         wd = _reading_for_station(wd_readings, sid) 
         if wd is None and len(wd_readings) > 0:
