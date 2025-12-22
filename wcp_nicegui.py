@@ -134,6 +134,7 @@ with ui.row().classes('w-full h-screen'):
             core.HAZARDS.append({
                 'id': core.HAZARD_ID,
                 'pos': np.array([hx, hy], dtype=float),
+                'origin_pos': np.array([hx, hy], dtype=float),
                 'r_m': float(max(5.0, hazard_radius.value)),
                 'label': label,  # <-- this stores the "where"
             })

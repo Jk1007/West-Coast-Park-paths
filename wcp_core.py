@@ -1219,6 +1219,7 @@ def Controls():
         HAZARDS.append({
             "id": HAZARD_ID,
             "pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
+            "origin_pos": np.array([float(pt[0]), float(pt[1])], dtype=float),
             "r_m": float(max(5.0, hazard_radius.value)),
         })
         HAZARD_ID += 1
@@ -1563,10 +1564,14 @@ def park_chart():
 
         # --- Evacuation recommendation arrows: hazard -> nearest safe zone ---
         arrow_pairs = []
-        if HAZARDS and SAFE_NODES:
+        safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+
+        if HAZARDS and safe_pool:
             for h in HAZARDS:
-                hx = float(h["pos"][0])
-                hy = float(h["pos"][1])
+                # Use origin_pos if available (for static arrow start), else current pos
+                origin = h.get("origin_pos", h["pos"])
+                hx = float(origin[0])
+                hy = float(origin[1])
 
                 # nearest graph node to hazard
                 _, h_node = _nearest_node_idx(hx, hy)
@@ -1574,7 +1579,7 @@ def park_chart():
                 # pick nearest safe node by shortest path length on the graph
                 best_safe = None
                 best_len = None
-                for s_node in SAFE_NODES:
+                for s_node in safe_pool:
                     d = _nx_path_length(h_node, s_node)
                     if best_len is None or d < best_len:
                         best_len = d
