@@ -101,69 +101,85 @@ def pull_realtime_weather():
     # Temperature
     tj = _fetch_data("air-temperature")
     if tj is None:
-        return
+        t = None 
+    else:
+        t_stations = tj.get("stations") or []
+        t_items = tj.get("readings") or []
+        if t_items:
+            t_readings = t_items[0].get("data") or []
+        else:
+            t_readings = []
+        sid = _nearest_station_id(t_stations)
 
-    t_stations = tj.get("stations") or []
-    t_readings = tj.get("readings") or []
-    sid = _nearest_station_id(t_stations)
+        if sid is None and len(t_readings) > 0:
+            sid = t_readings[0].get("station_id")
 
-    if sid is None and len(t_readings) > 0:
-        sid = t_readings[0].get("station_id")
-
-    t = _reading_for_station(t_readings, sid)
-    if t is None and len(t_readings) > 0:
-        t = t_readings[0].get("value")
+        t = _reading_for_station(t_readings, sid)
+        if t is None and len(t_readings) > 0:
+            t = t_readings[0].get("value")
 
 
 
     # Humidity
     hj = _fetch_data("relative-humidity")
     if hj is None:
-        return
+        hum = None 
+    else:
+        h_stations = hj.get("stations") or []
+        h_items = hj.get("readings") or []
+        if h_items:
+            h_readings = h_items[0].get("data") or []
+        else:
+            h_readings = []
+        sid = _nearest_station_id(h_stations)
 
-    h_stations = hj.get("stations") or []
-    h_readings = hj.get("readings") or []
-    sid = _nearest_station_id(h_stations)
+        if sid is None and len(h_readings) > 0:
+            sid = h_readings[0].get("station_id")
 
-    if sid is None and len(h_readings) > 0:
-        sid = h_readings[0].get("station_id")
-
-    rh = _reading_for_station(h_readings, sid)
-    if rh is None and len(h_readings) > 0:
-        rh = h_readings[0].get("value")
+        rh = _reading_for_station(h_readings, sid)
+        if rh is None and len(h_readings) > 0:
+            rh = h_readings[0].get("value")
 
     # Wind speed (knots → km/h)
     wj = _fetch_data("wind-speed")
     if wj is None:
-        return
+        w = None 
+    else:
+        ws_stations = wj.get("stations") or []
+        ws_items = wj.get("readings") or []
+        if ws_items:
+            ws_readings = ws_items[0].get("data") or []
+        else:
+            ws_readings = []
+        sid = _nearest_station_id(ws_stations)
 
-    ws_stations = wj.get("stations") or []
-    ws_readings = wj.get("readings") or []
-    sid = _nearest_station_id(ws_stations)
+        if sid is None and len(ws_readings) > 0:
+            sid = ws_readings[0].get("station_id")
 
-    if sid is None and len(ws_readings) > 0:
-        sid = ws_readings[0].get("station_id")
-
-    ws_knots = _reading_for_station(ws_readings, sid)
-    if ws_knots is None and len(ws_readings) > 0:
-        ws_knots = ws_readings[0].get("value")
+        ws_knots = _reading_for_station(ws_readings, sid)
+        if ws_knots is None and len(ws_readings) > 0:
+            ws_knots = ws_readings[0].get("value")
 
 
     # Wind direction (FROM)
     dj = _fetch_data("wind-direction")
     if dj is None:
-        return
-    
-    wd_stations = dj.get("stations") or []
-    wd_readings = dj.get("readings") or []
-    sid = _nearest_station_id(wd_stations)
+        d = None
+    else:
+        wd_stations = dj.get("stations") or []
+        wd_items = dj.get("readings") or []
+        if wd_items:
+            wd_readings = wd_items[0].get("data") or []
+        else:
+            wd_readings = []
+        sid = _nearest_station_id(wd_stations)
 
-    if sid is None and len(wd_readings) > 0:
-        sid = wd_readings[0].get("station_id")
+        if sid is None and len(wd_readings) > 0:
+            sid = wd_readings[0].get("station_id")
 
-    wd = _reading_for_station(wd_readings, sid) 
-    if wd is None and len(wd_readings) > 0:
-        wd = wd_readings[0].get("value")
+        wd = _reading_for_station(wd_readings, sid) 
+        if wd is None and len(wd_readings) > 0:
+            wd = wd_readings[0].get("value")
 
 
     # Store raw values
