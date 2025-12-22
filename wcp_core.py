@@ -368,13 +368,13 @@ def _update_panic(p):
 
 def _advance_hazards():
     if not HAZARDS: return
-    a = math.radians(float(wind_deg.value))
-    wind_m_per_tick = float(wind_speed.value)
-    dx = meters_to_dx(wind_m_per_tick * math.cos(a))
-    dy = meters_to_dy(wind_m_per_tick * math.sin(a))
+    # a = math.radians(float(wind_deg.value))
+    # wind_m_per_tick = float(wind_speed.value)
+    # dx = meters_to_dx(wind_m_per_tick * math.cos(a))
+    # dy = meters_to_dy(wind_m_per_tick * math.sin(a))
     dr_m = float(hazard_spread.value)
     for h in HAZARDS:
-        h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
+        # h["pos"] = h["pos"] + np.array([dx, dy], dtype=float)
         h["r_m"] = float(h["r_m"] + dr_m)
     _recompute_safe_nodes()
     _recompute_featured_safe()
