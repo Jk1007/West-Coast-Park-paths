@@ -387,7 +387,10 @@ def _spawn_people(n):
             # timing metrics
             "evac_start_tick": None,
             "evac_end_tick": None,
+            "evac_start_tick": None,
+            "evac_end_tick": None,
             "evac_time_s": None,
+            "exposed": False,
         })
     PEOPLE.extend(new_people)
 
@@ -455,6 +458,13 @@ def _step_once():
                 _retarget_to_nearest_safe(p)
         else:
             affected = _is_person_expected_affected(p["pos"], tnow)
+
+        # Persistent exposure check
+        if HAZARDS:
+            h, d_m = _nearest_hazard_m(p["pos"])
+            r_m = _hazard_radius_at(h) if h is not None else 0.0
+            if (h is not None) and (d_m < 1.5 * r_m):
+                p["exposed"] = True
 
         if not affected:
             p["aware"] = False
@@ -548,10 +558,7 @@ def agents_df():
             if not affected and not HAZARDS:
                 colors.append("steelblue")
             else:
-                h, d_m = _nearest_hazard_m(p["pos"])
-                r_m = _hazard_radius_at(h) if h is not None else 0.0
-                in_danger = (d_m < 1.5 * r_m) if (h is not None) else False
-                colors.append("purple" if (p.get("aware", False) and in_danger) else ("red"))
+                colors.append("purple" if p.get("exposed", False) else "red")
         sizes.append(10 if p["is_cyclist"] else 7)
     return pd.DataFrame({"x": xs, "y": ys, "color": colors, "size": sizes})
 
@@ -1054,7 +1061,8 @@ def _totals_now():
     evacuees_now = sum(1 for p in PEOPLE if _is_person_expected_affected(p["pos"], tnow))
     aware_now = sum(1 for p in PEOPLE if p.get("aware", False))
     reached_now = sum(1 for p in PEOPLE if p.get("reached", False))
-    return dict(total=total, evacuees=evacuees_now, aware=aware_now, reached=reached_now)
+    exposed_now = sum(1 for p in PEOPLE if p.get("exposed", False))
+    return dict(total=total, evacuees=evacuees_now, aware=aware_now, reached=reached_now, exposed=exposed_now)
 
 def qc_run(expected_margin_m=25.0):
     summaries = []
