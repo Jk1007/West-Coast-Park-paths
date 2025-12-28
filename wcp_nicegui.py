@@ -32,7 +32,7 @@ def update_labels(status_label, eta_label):
     status_label.text = (
         f"Tick: {int(tick.value)} | "
         f"Total: {t['total']} | In-envelope: {t['evacuees']} | "
-        f"Exposed: {t['exposed']} | Aware: {t['aware']} | Reached: {t['reached']}"
+        f"Exposed to either C,B,R or E: {t['exposed']} | Aware: {t['aware']} | Reached: {t['reached']}"
     )
     eta_label.text = kpi_eta_summary()
 
