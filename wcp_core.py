@@ -44,8 +44,29 @@ async def time_date_loop():
 
 
 # -------------------- LOAD WEST COAST PARK WALK GRAPH --------------------
-GRAPH_FILE = "west_coast_park_walk_clean.graphml"  # adjust if your file name differs
-G = ox.load_graphml(GRAPH_FILE)
+GRAPH_FILE = "west_coast_park_walk.graphml"
+G_walk = ox.load_graphml(GRAPH_FILE)
+G_bike = ox.load_graphml("west_coast_park_bike_clean.graphml")
+if G_walk.is_directed() != G_bike.is_directed():
+    G_bike = G_bike.to_directed() if G_walk.is_directed() else G_bike.to_undirected()
+G = nx.compose(G_walk, G_bike)
+
+# Filter: Restrict to G_walk bounding box to crop outliers
+nodes_Ref = ox.graph_to_gdfs(G_walk, nodes=True, edges=False)
+minx, miny, maxx, maxy = nodes_Ref["x"].min(), nodes_Ref["y"].min(), nodes_Ref["x"].max(), nodes_Ref["y"].max()
+buf = 0.002 if (maxx - minx) < 10.0 else 200.0  # ~200m buffer
+
+all_nodes = ox.graph_to_gdfs(G, nodes=True, edges=False)
+mask = (all_nodes["x"] > minx - buf) & (all_nodes["x"] < maxx + buf) & \
+       (all_nodes["y"] > miny - buf) & (all_nodes["y"] < maxy + buf)
+G = G.subgraph(all_nodes[mask].index).copy()
+
+# Filter: Keep only the largest connected component to remove isolated artifacts
+if G.is_directed():
+    largest_cc = max(nx.weakly_connected_components(G), key=len)
+else:
+    largest_cc = max(nx.connected_components(G), key=len)
+G = G.subgraph(largest_cc).copy()
 
 UG = nx.Graph()
 for u, v, d in G.to_undirected(as_view=False).edges(data=True):
@@ -1517,8 +1538,8 @@ def park_chart():
 
         xmin, ymin = NODE_POS.min(axis=0)
         xmax, ymax = NODE_POS.max(axis=0)
-        padx = max((xmax - xmin) * 0.03, 1.0)
-        pady = max((ymax - ymin) * 0.03, 1.0)
+        padx = max((xmax - xmin) * 0.005, 1.0)
+        pady = max((ymax - ymin) * 0.005, 1.0)
         x_domain = [float(xmin - padx), float(xmax + padx)]
         y_domain = [float(ymin - pady), float(ymax + pady)]
 
@@ -1678,7 +1699,7 @@ def park_chart():
         fig.update_layout(
             xaxis=dict(range=x_domain, showgrid=True, zeroline=False),
             yaxis=dict(range=y_domain, scaleanchor="x", scaleratio=1, showgrid=True, zeroline=False),
-            width=1000, height=600,
+            width=1200, height=800,
             margin=dict(t=30, l=40, r=10, b=40),
             paper_bgcolor="white", plot_bgcolor="white",
             clickmode="none",
@@ -1690,7 +1711,7 @@ def park_chart():
     except Exception as e:
         last_error.value = f"Chart error: {repr(e)}"
         return go.Figure(layout=go.Layout(
-            width=1000, height=600,
+            width=1200, height=800,
             margin=dict(t=30, l=40, r=10, b=40),
             paper_bgcolor="white", plot_bgcolor="white",
             title="Chart failed to render — see 'Render error' text above.",
