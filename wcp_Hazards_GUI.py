@@ -57,8 +57,8 @@ def _wind_factors(wind_speed):
 
     w = min(ws, 10.0)
 
-    downwind = 1.0 + 0.20 * w
-    upwind = 1.0 / (1.0 + 0.10 * w)
+    downwind = 1.0 + 0.80 * w
+    upwind = 1.0 / (1.0 + 0.30 * w)
     crosswind = 1.0 + 0.04 * w
     return downwind, upwind, crosswind
 

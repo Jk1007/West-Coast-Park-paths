@@ -113,7 +113,7 @@ num_people = sl.reactive(200)
 pct_cyclists = sl.reactive(15)
 
 hazard_radius = sl.reactive(40.0)     # m (initial radius of a new hazard)
-hazard_spread = sl.reactive(0.4)      # m/step (actual circle growth)
+hazard_spread = sl.reactive(0.15)      # m/step (actual circle growth)
 
 expected_growth_m = sl.reactive(3.0)  # m/step
 expected_buffer_m = sl.reactive(0.0)  # m
