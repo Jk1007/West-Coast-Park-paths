@@ -897,7 +897,7 @@ def _suggest_responders(k=None):
     """
     global RESPONDERS
 
-    RESPONDERS = set()
+    RESPONDERS.clear()
 
     # No hazards or no people => nothing to place
     if not HAZARDS or not PEOPLE:
