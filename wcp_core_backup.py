@@ -723,29 +723,20 @@ def _risk_eta_grid(x_domain, y_domain):
     safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
     if not safe_pool:
         return gx, gy, np.full_like(X, np.nan, dtype=float)
-    
-    # --- OPTIMIZATION START ---
-    # Instead of computing path for every pixel (slow), perform one graph traversal
-    # from all safe nodes simultaneously to find distance to NEAREST safe node.
-    try:
-        # returns dict {node_id: distance_m}
-        dists_dict = nx.multi_source_dijkstra_path_length(UG, safe_pool, weight="weight")
-    except Exception as e:
-        last_error.value = f"Risk grid error: {e}"
-        return gx, gy, np.zeros_like(X)
-    
     speed = max(0.5, float(risk_speed_mps.value))
-    
-    # Map node->distance to the grid
+    memo = {}
     etas = np.empty(idxs.shape[0], dtype=float)
     for i, nid in enumerate(node_ids):
-        d = dists_dict.get(nid, float("inf"))
-        if np.isfinite(d):
-            etas[i] = d / speed
+        if nid in memo:
+            etas[i] = memo[nid]; continue
+        tnode = _nearest_safe_node_from(nid)
+        if tnode == nid:
+            eta = 0.0
         else:
-            etas[i] = np.nan
-    # --- OPTIMIZATION END ---
-            
+            dist = _nx_path_length(nid, tnode)
+            eta = (dist / speed) if np.isfinite(dist) else np.nan
+        memo[nid] = eta
+        etas[i] = eta
     Z = etas.reshape(X.shape)
     return gx, gy, Z
 

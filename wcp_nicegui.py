@@ -385,7 +385,7 @@ with ui.row().classes('w-full h-screen'):
             update_labels(status_label, eta_label)
             redraw(plot)
 
-        ui.timer(0.05, timer_tick)
+        ui.timer(0.1, timer_tick)
 
 
 
