@@ -1584,8 +1584,8 @@ def park_chart():
             y_domain,
             dx_map_to_m,
             dy_map_to_m,
-            wind_deg,
-            wind_speed,
+            wind_deg.value,
+            wind_speed.value,
             grid=60)
         
         hx_list, hy_list = [], []
