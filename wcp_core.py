@@ -299,6 +299,8 @@ def _point_from_phrase(phrase: str):
     if p in centers:
         return np.array(centers[p], dtype=float)
 
+
+
     has_n = "north" in p or p == "n"
     has_s = "south" in p or p == "s"
     has_e = "east"  in p or p == "e"
@@ -313,6 +315,41 @@ def _point_from_phrase(phrase: str):
     if "middle" in p or "center" in p:
         return np.array(centers["center"], dtype=float)
     return None
+
+def add_hazard_at(x, y):
+    """Adds a generic hazard at the specified map coordinates."""
+    new_h = {
+        "id": f"H{len(HAZARDS)+1}",
+        "pos": np.array([float(x), float(y)]),
+        "r_m": float(hazard_radius.value),
+        "desc": "Map Click"
+    }
+    HAZARDS.append(new_h)
+    _recompute_safe_nodes()
+    _recompute_featured_safe()
+
+def remove_hazard_near(x, y, threshold_m=100.0):
+    """Removes the hazard closest to (x, y) if within threshold_m."""
+    if not HAZARDS:
+        return
+    
+    click_pos = np.array([float(x), float(y)])
+    best_h = None
+    min_dist = float("inf")
+
+    for h in HAZARDS:
+        dx_map = h["pos"][0] - click_pos[0]
+        dy_map = h["pos"][1] - click_pos[1]
+        dist_m = math.sqrt(dx_map_to_m(dx_map)**2 + dy_map_to_m(dy_map)**2)
+        
+        if dist_m < min_dist:
+            min_dist = dist_m
+            best_h = h
+            
+    if best_h and min_dist <= threshold_m:
+        HAZARDS.remove(best_h)
+        _recompute_safe_nodes()
+        _recompute_featured_safe()
 
 def _recompute_safe_nodes():
     global SAFE_NODES
@@ -1710,7 +1747,7 @@ def park_chart():
             width=1200, height=800,
             margin=dict(t=30, l=40, r=10, b=40),
             paper_bgcolor="white", plot_bgcolor="white",
-            clickmode="none",
+            clickmode="event",
             uirevision="stay"
         )
 

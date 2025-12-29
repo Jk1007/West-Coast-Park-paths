@@ -8,7 +8,8 @@ from wcp_core import (  # imports simulation + chart
     reset_model, _recompute_safe_nodes, _recompute_featured_safe,
     _choose_targets_and_paths, _force_evacuation_mode, _optimize_safe_zones_by_eta,
     _suggest_responders, _point_from_phrase, kpi_eta_summary,
-    _totals_now, park_chart, EVAC_NOTIFICATION_TICK)
+    _totals_now, park_chart, EVAC_NOTIFICATION_TICK,
+    add_hazard_at, remove_hazard_near)
 
 from wcp_weather import weather_now_str, forecast_2h_str, forecast_24h_str
 import wcp_weather as weather
@@ -393,8 +394,38 @@ with ui.row().classes('w-full h-screen'):
     # ===== RIGHT PANEL – plot =====
     with ui.column().classes('w-2/3 p-4'):
         plot = ui.plotly(park_chart()).classes('w-full h-full')
-        # first draw
-        redraw(plot)
+    
+    # --- Map Click Interaction ---
+    click_coords = {"x": 0, "y": 0}
+    with ui.dialog() as hazard_config_dialog, ui.card():
+        ui.label('Map Options').classes('text-lg font-bold')
+        
+        def on_create_click():
+            add_hazard_at(click_coords["x"], click_coords["y"])
+            hazard_config_dialog.close()
+            refresh_hazard_list()
+            redraw(plot)
+            
+        def on_remove_click():
+            remove_hazard_near(click_coords["x"], click_coords["y"])
+            hazard_config_dialog.close()
+            refresh_hazard_list()
+            redraw(plot)
+
+        ui.button('Create Hazard Here', on_click=on_create_click).classes('w-full color-red')
+        ui.button('Remove Nearest Hazard', on_click=on_remove_click).classes('w-full')
+        ui.button('Cancel', on_click=hazard_config_dialog.close).classes('w-full flat')
+
+    def handle_map_click(e):
+        points = e.args.get('points')
+        if points:
+            click_coords["x"] = points[0]['x']
+            click_coords["y"] = points[0]['y']
+            ui.notify(f"Selected: {click_coords['x']:.0f}, {click_coords['y']:.0f}")
+            hazard_config_dialog.open()
+
+    plot.on('plotly_click', handle_map_click, ['points'])
+    redraw(plot)
 
 
 # ---------- run NiceGUI ----------
