@@ -150,7 +150,8 @@ EVAC_NOTIFICATION_TICK = sl.reactive(None)  # record when hazard notified
 # Per-run state
 PEOPLE = []
 HAZARDS = []   # {"id": int, "pos": np.array([x,y]), "r_m": float}
-HAZARD_ID = 0
+HAZARD_ID = 1
+
 SAFE_NODES = []
 N_SAFE = 12
 MANUAL_SAFE = set()
@@ -299,6 +300,13 @@ def _point_from_phrase(phrase: str):
     if p in centers:
         return np.array(centers[p], dtype=float)
 
+def get_next_hazard_id_str():
+    global HAZARD_ID
+    # Return current ID then increment
+    hid = f"H{HAZARD_ID}"
+    HAZARD_ID += 1
+    return hid
+
 
 
     has_n = "north" in p or p == "n"
@@ -319,7 +327,7 @@ def _point_from_phrase(phrase: str):
 def add_hazard_at(x, y):
     """Adds a generic hazard at the specified map coordinates."""
     new_h = {
-        "id": f"H{len(HAZARDS)+1}",
+        "id": get_next_hazard_id_str(),
         "pos": np.array([float(x), float(y)]),
         "r_m": float(hazard_radius.value),
         "desc": "Map Click"

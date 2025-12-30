@@ -149,13 +149,12 @@ with ui.row().classes('w-full h-screen'):
                 label = phrase if phrase else '(' + str(round(hx, 0)) + ', ' + str(round(hy, 0)) + ')'
 
                 core.HAZARDS.append({
-                    'id': core.HAZARD_ID,
+                    'id': core.get_next_hazard_id_str(),
                     'pos': np.array([hx, hy], dtype=float),
                     'origin_pos': np.array([hx, hy], dtype=float),  # keep arrows stable
                     'r_m': float(max(5.0, hazard_radius.value)),
                     'label': label,
                 })
-                core.HAZARD_ID += 1
 
                 _recompute_safe_nodes()
                 _recompute_featured_safe()
