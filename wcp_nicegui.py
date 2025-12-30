@@ -210,7 +210,7 @@ with ui.row().classes('w-full h-screen'):
                     ui.notify('No hazards to remove.', type='warning')
                     return
 
-                hid = int(HAZARDS[-1]['id'])
+                hid = HAZARDS[-1]['id']
                 HAZARDS.pop()
 
                 _recompute_safe_nodes()
@@ -239,11 +239,10 @@ with ui.row().classes('w-full h-screen'):
                     ui.notify('No hazard selected.', type='warning')
                     return
 
-                target_id = int(hazard_select.value)
-
+                target_id = hazard_select.value
                 found = False
                 for i, h in enumerate(HAZARDS):
-                    if int(h.get('id')) == target_id:
+                    if str(h.get('id')) == str(target_id):
                         HAZARDS.pop(i)
                         found = True
                         break
