@@ -21,6 +21,7 @@ import math
 import requests
 import wcp_arrows_vis
 import wcp_Hazards_GUI as hazard_gui
+from wcp_responders import RESPONDERS
 from wcp_weather import (
     temperature_c,
     relative_humidity_pct,
@@ -158,7 +159,7 @@ MANUAL_SAFE = set()
 FEATURED_SAFE = set()
 
 # --- SCDF responder deployment state ---
-RESPONDERS = set()
+# RESPONDERS imported from wcp_responders
 N_RESPONDERS = sl.reactive(5)
 
 rng = np.random.default_rng(42)
@@ -992,101 +993,7 @@ def _build_response_demand(x_domain, y_domain):
     demand = np.maximum(demand, 0.0)
     return pgx, pgy, demand
 
-def _suggest_responders(k=None):
-    """
-    Place SCDF responder nodes with the rule:
-    - Minimum 4 responders per hazard.
-    - For each hazard:
-        * 1 responder exactly at the hazard location (nearest graph node).
-        * 3 responders on / near evacuation paths civilians use to reach safe zones.
-    """
-    global RESPONDERS
 
-    RESPONDERS.clear()
-
-    # No hazards or no people => nothing to place
-    if not HAZARDS or not PEOPLE:
-        return False
-
-    # How many we ideally want, ignoring any user-supplied k:
-    min_per_hazard = 4
-    target_total = min_per_hazard * len(HAZARDS)
-
-    # Keep track per hazard: (hazard_dict, hazard_node_id)
-    hazard_nodes = []
-
-    # ---------- 1) One responder at each hazard (nearest graph node) ----------
-    for h in HAZARDS:
-        hx, hy = float(h["pos"][0]), float(h["pos"][1])
-        # KDTree is already built on NODE_POS with NODE_IDS
-        dist, idx = KD.query([[hx, hy]])           # shape (1,2) -> nearest node index
-        nid = NODE_IDS[int(idx[0])]                # graph node id
-
-        RESPONDERS.add(nid)
-        hazard_nodes.append((h, nid))
-
-    # ---------- 2) Three responders on/near evacuation paths per hazard ----------
-    for h, hazard_node in hazard_nodes:
-        hx, hy = float(h["pos"][0]), float(h["pos"][1])
-        hz_pos = np.array([hx, hy], dtype=float)
-
-        # Collect candidate nodes along paths that:
-        # - belong to people who started near this hazard
-        # - are near the hazard corridor (within some radius)
-        candidate_nodes = Counter()
-
-        for p in PEOPLE:
-            path = p.get("path") or []
-            if not path:
-                continue
-
-            # Roughly decide if this person is "from this hazard region":
-            # distance from current position to hazard
-            p_pos = np.array(p["pos"], dtype=float)
-            d0 = map_distance_m(p_pos, hz_pos)
-            if d0 > 400.0:
-                # Person is probably not in this hazard's affected region
-                continue
-
-            # Now walk their full evacuation path and collect nearby nodes
-            for nid in path:
-                if nid == hazard_node:
-                    continue  # already using hazard_node as one responder
-                node_xy = _node_xy(nid)
-                dnode = map_distance_m(node_xy, hz_pos)
-                if dnode <= 600.0:
-                    # Node is along / near the corridor from this hazard
-                    candidate_nodes[nid] += 1
-
-        if not candidate_nodes:
-            # No strong path info for this hazard; skip extra 3
-            continue
-
-        # Sort nodes by:
-        # - most frequently used in paths (descending)
-        # This tends to pick choke points / main arteries
-        sorted_nodes = sorted(
-            candidate_nodes.keys(),
-            key=lambda n: -candidate_nodes[n]
-        )
-
-        # Pick up to 3 distinct nodes for this hazard
-        added = 0
-        for nid in sorted_nodes:
-            if nid in RESPONDERS:
-                continue
-            RESPONDERS.add(nid)
-            added += 1
-            if added >= 3:
-                break
-
-    # At this point, RESPONDERS has:
-    # - at least 1 per hazard (the hazard node),
-    # - up to 3 extra near-path nodes per hazard (if data allows).
-    # Because we deduplicate, the total may be <= 4 * len(HAZARDS)
-    # in overlapping regions. That’s okay and realistic.
-
-    return bool(RESPONDERS)
 # --------- Paths/collectors/QC ----------
 def _min_hazard_distance_at_xy(xy):
     if not HAZARDS:
@@ -1447,20 +1354,7 @@ def Controls():
         _recompute_featured_safe(); _choose_targets_and_paths(); tick.value += 1
         _notify("Optimized safe zones (min-ETA)." if ok else "Optimization failed; kept previous safe zones.")
 
-    # --- SCDF responders ---
-    def on_suggest_responders():
-        try:
-            k = max(0, int((responders_s or "0").strip()))
-        except:
-            k = int(N_RESPONDERS.value)
-        ok = _suggest_responders(k=k)
-        tick.value += 1
-        _notify("Suggested SCDF responder staging points." if ok else "Responder suggestion failed.")
 
-    def on_clear_responders():
-        RESPONDERS.clear()
-        tick.value += 1
-        _notify("Cleared SCDF responder staging points.")
 
     # ---------- Render Controls ----------
     sl.Markdown("### Quality Check")
@@ -1607,10 +1501,7 @@ def Controls():
         sl.Button("Clear Safe Zones", on_click=on_clear_safe)
         sl.Button("Suggest (optimize) Safe Zones", on_click=on_optimize_dist)
 
-    sl.Markdown("**SCDF Responder Deployment**")
-    with sl.Row():
-        sl.Button("Suggest SCDF Responder Staging", on_click=on_suggest_responders)
-        sl.Button("Clear SCDF Responders", on_click=on_clear_responders)
+
 
     if last_error.value:
         sl.Markdown(f"**Render error:** {last_error.value}")

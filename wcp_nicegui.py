@@ -3,13 +3,14 @@
 
 from nicegui import ui
 from wcp_core import (  # imports simulation + chart
-    tick, running, PEOPLE, HAZARDS, RESPONDERS,
+    tick, running, PEOPLE, HAZARDS,
     hazard_radius,
     reset_model, _recompute_safe_nodes, _recompute_featured_safe,
     _choose_targets_and_paths, _force_evacuation_mode, _optimize_safe_zones_by_eta,
-    _suggest_responders, _point_from_phrase, kpi_eta_summary,
+    _point_from_phrase, kpi_eta_summary,
     _totals_now, park_chart, EVAC_NOTIFICATION_TICK,
     add_hazard_at, remove_hazard_near)
+import wcp_responders as responders
 
 from datetime import datetime
 from wcp_weather import weather_now_str, forecast_2h_str, forecast_24h_str
@@ -309,7 +310,15 @@ with ui.row().classes('w-full h-screen'):
         def suggest_responders():
             try:
                 # let core decide how many responders to use
-                ok = _suggest_responders()
+                # Pass all dependencies explicitly to the new module
+                ok = responders.suggest_responders(
+                    hazards=core.HAZARDS,
+                    people=core.PEOPLE,
+                    kd_tree=core.KD,
+                    node_ids=core.NODE_IDS,
+                    pos_dict=core.POS_DICT,
+                    map_dist_func=core.map_distance_m
+                )
 
                 update_labels(status_label, eta_label)
                 redraw(plot)
@@ -334,7 +343,7 @@ with ui.row().classes('w-full h-screen'):
             ui.button('Suggest SCDF Responders', on_click=suggest_responders).classes('w-1/2')
             ui.button(
                 'Clear Responders',
-                on_click=lambda: (RESPONDERS.clear(), redraw(plot), ui.notify('Cleared responders.', type='positive')),
+                on_click=lambda: (responders.RESPONDERS.clear(), redraw(plot), ui.notify('Cleared responders.', type='positive')),
             ).classes('w-1/2')
 
         ui.separator()
