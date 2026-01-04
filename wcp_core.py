@@ -131,13 +131,13 @@ plume_Q_gs = sl.reactive(100.0)       # g/s
 plume_H_m = sl.reactive(20.0)         # m
 plume_stab = sl.reactive("D")         # A..F
 plume_range_m = sl.reactive(1500.0)   # m
-plume_grid = sl.reactive(60)          # rows
+plume_grid = sl.reactive(45)          # rows
 
 qc_show_paths = sl.reactive(False)
 qc_km_margin = sl.reactive(25.0)
 
 risk_show = sl.reactive(True)
-risk_grid = sl.reactive(60)
+risk_grid = sl.reactive(45)
 risk_speed_mps = sl.reactive(1.4)
 
 qc_summary = sl.reactive("")
@@ -442,10 +442,40 @@ def _spawn_people(n):
     PEOPLE.extend(new_people)
 
 def _retarget_to_nearest_safe(p):
-    _, s_node = _nearest_node_idx(p["pos"][0], p["pos"][1])
-    t_node = _nearest_safe_node_from(s_node)
-    p["target_node"] = t_node
-    p["path"] = _nx_path(s_node, t_node)
+    # Enforce capacity limit: max 10 people per safe zone node
+    # 1. Count current occupancy (approximate, based on target lock)
+    occupancy = Counter(person.get("target_node") for person in PEOPLE)
+    
+    # 2. Get all safe nodes (unified pool)
+    candidates = list(set(SAFE_NODES) | set(MANUAL_SAFE))
+    if not candidates:
+        return # Nowhere to go
+
+    # 3. Sort candidates by distance to person
+    px, py = p["pos"]
+    def dist_sq(nid):
+        nx, ny = POS_DICT[nid]
+        return (nx-px)**2 + (ny-py)**2
+    
+    candidates.sort(key=dist_sq)
+
+    # 4. Find first candidate with occupancy < 10
+    chosen = None
+    for cand in candidates:
+        if occupancy[cand] < 10:
+            chosen = cand
+            break
+    
+    # Fallback: if all full, crowd the nearest (better than crashing or staying stuck)
+    if chosen is None:
+        chosen = candidates[0]
+
+    p["target_node"] = chosen
+    p["path"] = _nx_path(chosen, chosen) # Re-calc path logic separate or simplified here? 
+    # WAIT: _nx_path needs (start_node, end_node). We only have end.
+    # Need start node.
+    _, s_node = _nearest_node_idx(px, py)
+    p["path"] = _nx_path(s_node, chosen)
     p["path_idx"] = 0
 
 def _choose_targets_and_paths():
@@ -1662,7 +1692,7 @@ def park_chart():
             dy_map_to_m,
             wind_deg.value,
             wind_speed.value,
-            grid=60)
+            grid=45)
         
         hx_list, hy_list, h_text = [], [], []
         for h in list(HAZARDS):
@@ -1692,25 +1722,38 @@ def park_chart():
         ))
 
         safe_pool = list(set(SAFE_NODES) | set(MANUAL_SAFE))
-        sx_bg, sy_bg, sx_fg, sy_fg = [], [], [], []
+        
+        # Calculate real-time occupancy for visualization - ARRIVED only
+        occupancy_viz = Counter(person.get("target_node") for person in PEOPLE if person.get("reached"))
+
+        sx_bg, sy_bg, stext_bg = [], [], []
+
         for nid in safe_pool:
             x, y = POS_DICT[nid]
-            if nid in FEATURED_SAFE:
-                sx_fg.append(x); sy_fg.append(y)
-            else:
-                sx_bg.append(x); sy_bg.append(y)
+            occ = occupancy_viz[nid]
+            tooltip = f"Safe Zone {nid}<br>{occ}/10"
+            
+            # All unified to Dark Green style
+            sx_bg.append(x); sy_bg.append(y)
+            stext_bg.append(tooltip)
 
         fig.add_trace(go.Scatter(
             x=sx_bg, y=sy_bg, mode="markers",
             marker=dict(size=12, color="rgb(0,90,0)", symbol="circle"),
-            name="Safe zones", hoverinfo="skip", showlegend=True,
+            name="Safe zones", 
+            text=stext_bg, hoverinfo="text", 
+            showlegend=True,
             visible=True if sx_bg else False
         ))
+        
+        # Empty trace for Featured to maintain legend or remove entirely if desired. 
+        # User said "only dark green", so hiding/removing second trace.
         fig.add_trace(go.Scatter(
-            x=sx_fg, y=sy_fg, mode="markers",
+            x=[], y=[], mode="markers",
             marker=dict(size=14, color="rgb(0,180,0)", symbol="circle-open"),
-            name="Featured safe zones", hoverinfo="skip", showlegend=True,
-            visible=True if sx_fg else False
+            name="Featured safe zones", 
+            hoverinfo="skip", showlegend=False,
+            visible=False
         )) 
 
         # --- Evacuation recommendation arrows: hazard -> nearest safe zone ---
