@@ -330,7 +330,9 @@ def add_hazard_at(x, y):
         "id": get_next_hazard_id_str(),
         "pos": np.array([float(x), float(y)]),
         "r_m": float(hazard_radius.value),
-        "desc": "Map Click"
+        "desc": "Map Click",
+        "created_at": datetime.now().strftime("%d %b %Y, %H:%M:%S"),
+        "type": "N/A"
     }
     HAZARDS.append(new_h)
     _recompute_safe_nodes()
@@ -1662,15 +1664,30 @@ def park_chart():
             wind_speed.value,
             grid=60)
         
-        hx_list, hy_list = [], []
+        hx_list, hy_list, h_text = [], [], []
         for h in list(HAZARDS):
             hx_list.append(float(h["pos"][0]))
             hy_list.append(float(h["pos"][1]))
+            
+            # Prepare tooltip info
+            hid = h.get("id", "?")
+            # Default to now if missing (migration safety)
+            created = h.get("created_at", "Just now") 
+            htype = h.get("type", "N/A")
+            
+            tooltip = (
+                f"Hazard ID: {hid}<br>"
+                f"Created: {created}<br>"
+                f"Chemical Type: {htype}"
+            )
+            h_text.append(tooltip)
 
         fig.add_trace(go.Scatter(
             x=hx_list, y=hy_list, mode="markers",
             marker=dict(symbol="x", size=11, line=dict(width=2), color="red"),
-            hoverinfo="skip", showlegend=True, name="Hazard centers",
+            text=h_text,
+            hoverinfo="text", 
+            showlegend=True, name="Hazard centers",
             visible=True if hx_list else False
         ))
 

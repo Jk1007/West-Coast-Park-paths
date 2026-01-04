@@ -11,6 +11,7 @@ from wcp_core import (  # imports simulation + chart
     _totals_now, park_chart, EVAC_NOTIFICATION_TICK,
     add_hazard_at, remove_hazard_near)
 
+from datetime import datetime
 from wcp_weather import weather_now_str, forecast_2h_str, forecast_24h_str
 import wcp_weather as weather
 import numpy as np
@@ -154,6 +155,8 @@ with ui.row().classes('w-full h-screen'):
                     'origin_pos': np.array([hx, hy], dtype=float),  # keep arrows stable
                     'r_m': float(max(5.0, hazard_radius.value)),
                     'label': label,
+                    'created_at': datetime.now().strftime("%d %b %Y, %H:%M:%S"),
+                    'type': "N/A"
                 })
 
                 _recompute_safe_nodes()
