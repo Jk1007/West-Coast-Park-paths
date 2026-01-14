@@ -48,7 +48,7 @@ def redraw(plot):
 
 # ---------- NiceGUI layout ----------
 
-with ui.row().classes('w-full h-screen'):
+with ui.row().classes('w-full h-screen no-wrap gap-0'):
 
     # ===== LEFT PANEL =====
     with ui.column().classes('w-1/3 p-4 gap-2'):
@@ -402,7 +402,7 @@ with ui.row().classes('w-full h-screen'):
 
 
     # ===== RIGHT PANEL – plot =====
-    with ui.column().classes('w-2/3 p-4'):
+    with ui.column().classes('w-2/3 p-0 gap-0'):
         plot = ui.plotly(park_chart()).classes('w-full h-full')
     
     # --- Map Click Interaction ---

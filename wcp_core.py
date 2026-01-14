@@ -1520,6 +1520,7 @@ def park_chart():
         y_domain = [float(ymin - pady), float(ymax + pady)]
 
         fig = go.Figure()
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
 
         plume_data = _plume_concentration_grid(x_domain, y_domain) if (plume_show.value and HAZARDS) else None
         risk_data  = _risk_eta_grid(x_domain, y_domain) if risk_show.value else None
