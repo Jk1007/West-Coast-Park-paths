@@ -53,22 +53,34 @@ with ui.row().classes('w-full h-screen no-wrap gap-0'):
     # ===== LEFT PANEL =====
     with ui.column().classes('w-1/3 p-2 gap-1'):
 
-        ui.markdown('## West Coast Park – Evacuation & SCDF (NiceGUI)')
+        ui.markdown('## West Coast Park (Evac)')
 
-        # --- Weather (Compact) ---
-        with ui.row().classes('w-full items-center justify-between text-xs'):
-             ui.label().bind_text_from(weather_now_str, 'value')
-             ui.label().bind_text_from(forecast_2h_str, 'value')
-             ui.label().bind_text_from(forecast_24h_str, 'value')
-        
-        # Time/Date + Error
-        with ui.row().classes('w-full items-center justify-between text-xs'):
-            ui.label().bind_text_from(time_str, 'value')
-            ui.label().bind_text_from(date_str, 'value')
-            ui.label().bind_text_from(weather.last_error, 'value').classes('text-red')
+        # --- Card 1: Environment ---
+        with ui.card().classes('w-full p-2 gap-1 bg-gray-100'):
+            with ui.row().classes('w-full justify-between items-center'):
+                ui.label('Environment').classes('font-bold text-xs')
+                with ui.row().classes('gap-2 text-xs'):
+                    ui.label().bind_text_from(time_str, 'value').classes('font-mono')
+                    ui.label().bind_text_from(date_str, 'value').classes('font-mono')
+            
+            # Weather Column (Vertical Stack)
+            with ui.column().classes('w-full gap-0 text-xs'):
+                ui.label('Current Weather:').classes('font-bold text-gray-800 mt-1')
+                ui.label().bind_text_from(weather_now_str, 'value').classes('ml-2')
 
-        status_label = ui.label().classes('text-xs')
-        eta_label = ui.label().classes('text-xs')
+                ui.label('2-Hour Forecast:').classes('font-bold text-gray-800 mt-1')
+                ui.label().bind_text_from(forecast_2h_str, 'value').classes('ml-2 text-gray-600')
+
+                ui.label('24-Hour Forecast:').classes('font-bold text-gray-800 mt-1')
+                ui.label().bind_text_from(forecast_24h_str, 'value').classes('ml-2 text-gray-500 italic')
+
+                ui.label().bind_text_from(weather.last_error, 'value').classes('text-red font-bold')
+
+        # --- Card 2: Simulation Status ---
+        with ui.card().classes('w-full p-2 gap-1 bg-blue-50'):
+            ui.label('Status').classes('font-bold text-xs mb-1')
+            status_label = ui.label().classes('text-xs font-mono whitespace-pre-wrap')
+            eta_label = ui.label().classes('text-xs font-mono')
 
         # --- STEP / RUN / RESET ---
 
