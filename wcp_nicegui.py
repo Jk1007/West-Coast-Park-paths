@@ -51,12 +51,24 @@ def redraw(plot):
 with ui.row().classes('w-full h-screen no-wrap gap-0'):
 
     # ===== LEFT PANEL =====
-    with ui.column().classes('w-1/3 p-4 gap-2'):
+    with ui.column().classes('w-1/3 p-2 gap-1'):
 
         ui.markdown('## West Coast Park – Evacuation & SCDF (NiceGUI)')
 
-        status_label = ui.label()
-        eta_label = ui.label()
+        # --- Weather (Compact) ---
+        with ui.row().classes('w-full items-center justify-between text-xs'):
+             ui.label().bind_text_from(weather_now_str, 'value')
+             ui.label().bind_text_from(forecast_2h_str, 'value')
+             ui.label().bind_text_from(forecast_24h_str, 'value')
+        
+        # Time/Date + Error
+        with ui.row().classes('w-full items-center justify-between text-xs'):
+            ui.label().bind_text_from(time_str, 'value')
+            ui.label().bind_text_from(date_str, 'value')
+            ui.label().bind_text_from(weather.last_error, 'value').classes('text-red')
+
+        status_label = ui.label().classes('text-xs')
+        eta_label = ui.label().classes('text-xs')
 
         # --- STEP / RUN / RESET ---
 
@@ -270,8 +282,10 @@ with ui.row().classes('w-full h-screen no-wrap gap-0'):
         with ui.row().classes('w-full gap-2'):
             ui.button('Add Hazard', on_click=add_hazard).classes('w-1/2')
             ui.button('Clear Hazards', on_click=clear_hazards).classes('w-1/2')
-        ui.button('Remove Last Hazard', on_click=remove_last_hazard).classes('w-full mt-1')
-        ui.button('Remove Selected Hazard', on_click=remove_selected_hazard).classes('w-full mt-1')
+
+        with ui.row().classes('w-full gap-2'):
+            ui.button('Remove Last', on_click=remove_last_hazard).classes('w-1/2')
+            ui.button('Remove Sel', on_click=remove_selected_hazard).classes('w-1/2')
 
         # in case there are pre-existing hazards from the core:
         refresh_hazard_list()
@@ -345,30 +359,6 @@ with ui.row().classes('w-full h-screen no-wrap gap-0'):
                 'Clear Responders',
                 on_click=lambda: (responders.RESPONDERS.clear(), redraw(plot), ui.notify('Cleared responders.', type='positive')),
             ).classes('w-1/2')
-
-        ui.separator()
-        ui.markdown('### Status')
-        ui.markdown('**Weather (NEA)**')
-
-        with ui.grid(columns=2).classes('w-full gap-2'):
-            ui.label('Now')
-            ui.label().bind_text_from(weather_now_str, 'value')
-
-            ui.label('Next 2 hours')
-            ui.label().bind_text_from(forecast_2h_str, 'value')
-
-            ui.label('Next 24 hours')
-            ui.label().bind_text_from(forecast_24h_str, 'value')
-        #checking for error
-        ui.label().bind_text_from(weather.last_error, 'value')
-
-        ui.label().bind_text_from(time_str, 'value')
-        ui.label().bind_text_from(date_str, 'value')
-
-        ui.markdown('**Evacuation ETA summary:**')
-        ui.label().bind_text_from(eta_label, 'text')
-        ui.markdown('**Counts:**')
-        ui.label().bind_text_from(status_label, 'text')
 
         # Initialise labels once
         update_labels(status_label, eta_label)
