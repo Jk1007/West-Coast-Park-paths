@@ -1534,30 +1534,30 @@ def park_chart():
             show_conc = (conc is not None) and np.isfinite(conc).any() and (float(np.nanmax(conc)) > 0)
             fig.add_trace(go.Heatmap(
                 x=gx.tolist(), y=gy.tolist(), z=conc if show_conc else np.zeros((len(gy), len(gx))),
-                zsmooth="best", coloraxis="coloraxis", opacity=0.55, showscale=True,
+                zsmooth="best", coloraxis="coloraxis", opacity=0.55, showscale=False,
                 name="Concentration (g/m^3)", visible=True if show_conc else False
             ))
         else:
             fig.add_trace(go.Heatmap(
-                x=[], y=[], z=[], coloraxis="coloraxis", opacity=0.55, showscale=True,
+                x=[], y=[], z=[], coloraxis="coloraxis", opacity=0.55, showscale=False,
                 name="Concentration (g/m^3)", visible=False
             ))
-        fig.update_layout(coloraxis=dict(colorscale="YlOrRd"))
+        fig.update_layout(coloraxis=dict(colorscale="YlOrRd", showscale=False))
 
         if risk_data is not None:
             rx, ry, rZ = risk_data
             show_risk = (rZ is not None) and np.isfinite(rZ).any()
             fig.add_trace(go.Heatmap(
                 x=rx.tolist(), y=ry.tolist(), z=rZ if show_risk else np.zeros((len(ry), len(rx))),
-                zsmooth="best", coloraxis="coloraxis2", opacity=0.45, showscale=True,
+                zsmooth="best", coloraxis="coloraxis2", opacity=0.45, showscale=False,
                 name="ETA to safety (s)", visible=True if show_risk else False
             ))
         else:
             fig.add_trace(go.Heatmap(
-                x=[], y=[], z=[], coloraxis="coloraxis2", opacity=0.45, showscale=True,
+                x=[], y=[], z=[], coloraxis="coloraxis2", opacity=0.45, showscale=False,
                 name="ETA to safety (s)", visible=False
             ))
-        fig.update_layout(coloraxis2=dict(colorscale="Blues"))
+        fig.update_layout(coloraxis2=dict(colorscale="Blues", showscale=False))
 
         fig.add_trace(go.Scatter(
             x=seg_x if seg_x else [], y=seg_y if seg_y else [], mode="lines",
