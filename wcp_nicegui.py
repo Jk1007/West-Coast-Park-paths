@@ -1,7 +1,23 @@
 # wcp_nicegui.py
 # NiceGUI frontend that wraps the West Coast Park core sim
 
-from nicegui import ui
+# NiceGUI frontend that wraps the West Coast Park core sim
+
+from nicegui import ui, app  # Added 'app' for storage
+import os
+import html
+
+# --- Manual .env loader (No hardcoded secrets) ---
+try:
+    with open('.env', 'r') as f:
+        for line in f:
+            line = line.strip()
+            if '=' in line and not line.startswith('#'):
+                k, v = line.split('=', 1)
+                os.environ[k] = v
+except FileNotFoundError:
+    print("Warning: .env file not found. Admin login may fail.")
+
 from wcp_core import (  # imports simulation + chart
     tick, running, PEOPLE, HAZARDS,
     hazard_radius,
@@ -49,6 +65,21 @@ def redraw(plot):
 
 @ui.page('/')
 def admin_page():
+    # --- OWASP A01: Broken Access Control (Admin Login) ---
+    def try_login():
+        if pwd_input.value == os.environ.get("ADMIN_PASSWORD"):
+            app.storage.user['authenticated'] = True
+            ui.navigate.to('/')
+        else:
+            ui.notify("Invalid Password", type='negative')
+
+    if not app.storage.user.get('authenticated', False):
+        with ui.column().classes('w-full h-screen items-center justify-center bg-gray-900 text-white'):
+            ui.label('Restricted Access').classes('text-2xl font-bold mb-4')
+            pwd_input = ui.input('Admin Password', password=True).on('keydown.enter', try_login).classes('w-64 bg-gray-800')
+            ui.button('Login', on_click=try_login).classes('w-64 bg-blue-600 mt-2')
+        return
+
     global ui_busy
     with ui.row().classes('w-full h-screen no-wrap gap-0'):
 
@@ -163,7 +194,11 @@ def admin_page():
                 core.running.value = False
 
                 try:
+                    # OWASP A03: Injection (Input Limit)
                     phrase = (location_input.value or '').strip()
+                    if len(phrase) > 100:
+                        phrase = phrase[:100]
+
                     pt = _point_from_phrase(phrase)
 
                     if pt is None:
@@ -174,7 +209,9 @@ def admin_page():
                         return
 
                     hx, hy = float(pt[0]), float(pt[1])
-                    label = phrase if phrase else '(' + str(round(hx, 0)) + ', ' + str(round(hy, 0)) + ')'
+                    # OWASP A03: Injection (XSS Prevention)
+                    safe_phrase = html.escape(phrase)
+                    label = safe_phrase if safe_phrase else '(' + str(round(hx, 0)) + ', ' + str(round(hy, 0)) + ')'
 
                     core.HAZARDS.append({
                         'id': core.get_next_hazard_id_str(),
@@ -207,7 +244,8 @@ def admin_page():
                 except Exception as e:
                     print('Error in add_hazard:', e)
                     traceback.print_exc()
-                    ui.notify('Add hazard failed: ' + str(e), type='negative')
+                    # OWASP A05: Security Misconfiguration (Mask Errors)
+                    ui.notify('Add hazard failed (Invalid Input)', type='negative')
 
                 finally:
                     if was_running:
@@ -456,4 +494,5 @@ if __name__ == '__main__':
         host='127.0.0.1',
         port=8080,
         reload=False,
+        storage_secret='s3cr3t-k3y-reset-in-prod-env' # OWASP A07: Session Integrity
     )

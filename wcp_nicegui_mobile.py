@@ -1,4 +1,4 @@
-from nicegui import ui
+from nicegui import ui, app
 import numpy as np
 import plotly.graph_objects as go
 import wcp_core as core
@@ -6,6 +6,8 @@ import wcp_core as core
 def init_mobile_page():
     @ui.page('/public')
     def public_page():
+        # OWASP A01: Strict Logout (Force re-login if user goes back to Admin)
+        app.storage.user['authenticated'] = False
         # Simulated User Location (fixed for demo)
         user_pos = np.array([120, 300], dtype=float)
 
