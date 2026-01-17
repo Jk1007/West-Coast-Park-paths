@@ -11,15 +11,22 @@ def init_mobile_page():
         # Simulated User Location (fixed for demo)
         user_pos = np.array([120, 300], dtype=float)
 
-        with ui.column().classes('w-full h-screen p-0 gap-0'):
-            # Header
-            ui.label('West Coast Park (Public Evac)').classes('w-full text-center font-bold text-lg bg-gray-200 p-2')
+        # Outer container (background)
+        with ui.column().classes('w-full h-screen items-center justify-center bg-gray-900'):
             
-            # Status Banner
-            status_banner = ui.label('Loading...').classes('w-full text-center p-2 font-bold text-white')
+            # Phone Frame (Bezel, Shadow, Rounded)
+            with ui.column().classes('w-[375px] h-[800px] bg-white border-[16px] border-black rounded-[3rem] overflow-hidden shadow-2xl relative p-0 gap-0'):
+                
+                # Header
+                ui.label('West Coast Park (Public Evac)').classes('w-full text-center font-bold text-lg bg-gray-200 p-2')
+                
+                # Status Banner
+                status_banner = ui.label('Loading...').classes('w-full text-center p-2 font-bold text-white')
 
-            # Map Container
-            plot = ui.plotly(core.park_chart()).classes('w-full grow')
+                # Map Container
+                # Config: scrollZoom=True allows pinching/scrolling. displayModeBar=False hides top toolbar.
+                # Fixed 500 Error: ui.plotly does not support .config() chaining.
+                plot = ui.plotly(core.park_chart()).classes('w-full grow')
 
             def update_public_view():
                 # 1. Update Status Banner
@@ -46,6 +53,14 @@ def init_mobile_page():
 
                 # 3. Get fresh map & Add overlays
                 fig = core.park_chart()
+                
+                # Fix Usability: Enable Pan, persistence (uirevision), and no margins
+                fig.update_layout(
+                    dragmode='pan',
+                    hovermode='closest',
+                    uirevision='constant',  # <--- CRITICAL: Preserves zoom/pan state across updates
+                    margin=dict(l=0, r=0, t=0, b=0)
+                )
                 
                 # Simulated User Dot (Blue)
                 fig.add_trace(go.Scatter(

@@ -6,6 +6,7 @@
 from nicegui import ui, app  # Added 'app' for storage
 import os
 import html
+import secrets  # <--- For dynamic session keys
 
 # --- Manual .env loader (No hardcoded secrets) ---
 try:
@@ -494,5 +495,5 @@ if __name__ == '__main__':
         host='127.0.0.1',
         port=8080,
         reload=False,
-        storage_secret='s3cr3t-k3y-reset-in-prod-env' # OWASP A07: Session Integrity
+        storage_secret=secrets.token_hex(32) # OWASP A07: Dynamic secret forces new login on restart
     )
