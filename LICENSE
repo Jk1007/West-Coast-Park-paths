@@ -1,0 +1,274 @@
+TERMS OF USE (JKW LICENSE v1.1)
+
+CrowdShield®
+Copyright © 2025–present
+Wee Jun Kang. All rights reserved.
+
+These Terms of Use govern access to and interaction with the CrowdShield® project.
+By accessing this repository, you agree to all terms listed below.
+
+1. Intellectual Property Ownership
+
+CrowdShield® and all associated source code, logic, files, and documentation are the exclusive intellectual property of Wee Jun Kang ("the Author").
+
+No rights are granted unless explicitly stated in writing by the Author.
+
+2. Public Visibility vs Permission to Use
+
+This repository is publicly viewable for transparency, educational reference, and portfolio purposes.
+Visibility does not grant usage rights.
+
+Without explicit written permission from the Author, you may not:
+
+- Copy the code
+
+- Fork the repository
+
+- Download files
+
+- Re-upload or redistribute
+
+- Modify or create derivative works
+
+- Integrate the code into any system
+
+- Use it for academic submissions or school projects
+
+- Use it for commercial, enterprise, or government work
+
+- Train AI models using this code
+
+- Publish or mirror it anywhere else
+
+
+All usage requires written approval.
+
+3. Authorized Collaborators
+
+The Author grants the following specific copyright permissions to the individuals listed below.
+All permissions granted under this section are non-exclusive, non-commercial, non-transferable, and revocable at the sole discretion of the Author.
+
+3.1. Kho Soong Yang 
+
+Kho Soong Yang is granted a non-exclusive license to:
+
+- Access, use, and modify the source code;
+
+- Create derivative non-commercial academic works based on the code;
+
+- Incorporate portions of the code into his own academic or experimental projects;
+
+- Retain local copies for personal study and research.
+
+
+This license does not permit:
+
+- Sublicensing,
+
+- Redistribution to any third party,
+
+- Commercial use, or
+
+- Integration into proprietary or commercial systems.
+
+
+All rights remain the exclusive property of the Author.
+
+3.2. Setoh Kai Heng
+
+Setoh Kai Heng is granted a non-exclusive license to:
+
+- Access, use, and modify the source code;
+
+- Create derivative non-commercial academic works based on the code;
+
+- Incorporate portions of the code into his own academic or experimental projects;
+
+- Retain local copies for personal study and research.
+
+
+This license does not permit:
+
+- Sublicensing,
+
+- Redistribution to any third party,
+
+- Commercial use, or
+
+- Integration into proprietary or commercial systems.
+
+
+All rights remain the exclusive property of the Author.
+
+
+3.3. Tan Hong Le
+
+Tan Hong Le are granted a limited copyright license to:
+
+- Access and view the code;
+
+- Run the software for academic learning and testing;
+
+- Submit contributions directly to this project at the Author’s request.
+
+
+They are not permitted to:
+
+- Create derivative works,
+
+- Redistribute or share any portion of the code,
+
+- Incorporate the code into external systems, or
+
+- Store or publish modified versions.
+
+
+All rights not expressly granted are reserved by the Author.
+
+3.4. Revocation
+
+The Author may revoke any collaborator’s license at any time.
+Upon revocation, the collaborator must:
+
+- Delete all local copies,
+
+- Cease use of the code, and
+
+- Stop distributing or referencing any derivative work created under the license.
+
+3.5 Academic Collaboration
+
+Authorized collaborators may co-author academic papers, reports, or presentations that describe or analyze CrowdShield®, provided that:
+- The code itself is not redistributed,
+- Proper attribution is included,
+- The work remains non-commercial,
+- The publication does not grant rights to any third parties.
+
+4. Required Attribution
+
+Any authorized use must include this exact attribution string:
+
+CrowdShield® — Created by Wee Jun Kang. Core collaborators: Kho Soong Yang, Setoh Kai Heng, Tan Hong Le.
+
+The attribution must remain intact in all files, documentation, publications, or derivative works.
+Removal or alteration of attribution is prohibited.
+
+5. Prohibited Actions
+
+The following actions are prohibited without written permission:
+
+- Redistributing or publishing any part of the code
+
+- Uploading forks, mirrors, or modified versions
+
+- Incorporating the software into proprietary or commercial systems
+
+- Using the code for academic grading or research projects
+
+- Sharing the code with any third parties
+
+- Creating derivative versions or competing implementations
+
+- Using any portion of the code in government, enterprise, or military environments
+
+- Training language models or AI systems on this code
+
+- Removing, modifying, or hiding attribution information
+
+
+Violations may result in DMCA takedown notices and legal enforcement.
+
+6. Disclaimer of Warranty
+
+The software is provided "as is" without warranty of any kind.
+The Author is not liable for:
+
+- Damages
+
+- Data loss
+
+- Performance failures
+
+- Direct or indirect misuse
+
+
+All usage is at your own risk.
+
+7. Enforcement
+
+The Author reserves full rights to:
+
+- Issue DMCA takedowns
+
+- Request removal of unauthorized forks
+
+- Pursue copyright enforcement
+
+- Revoke collaborator permissions
+
+
+GitHub timestamps and commit logs serve as legal proof of authorship.
+
+8. Governing Law
+
+These Terms of Use are governed by the laws of Singapore.
+Any disputes will be resolved under Singapore jurisdiction.
+
+End of Terms.
+
+
+---
+
+LICENSE SUMMARY (JKW License v1.1)
+
+This project is not open-source.
+All rights belong to Wee Jun Kang.
+
+You may:
+
+- View the repository
+
+- Reference it for learning or academic reading
+
+- Cite it with proper credit
+
+
+You may not (without written permission):
+
+- Copy or reuse the code
+
+- Fork or download the repository
+
+- Modify or redistribute any files
+
+- Upload or mirror any part of the code
+
+- Integrate the code into other software
+
+- Use it for commercial or enterprise work
+
+- Use it for school assignments, hackathons, or research work
+
+- Train AI systems on it
+
+- Remove or modify attribution
+
+
+Authorized collaborators (non-commercial academic use only):
+
+Kho Soong Yang
+
+Setoh Kai Heng
+
+Tan Hong Le
+
+
+Required attribution: CrowdShield® — Created by Wee Jun Kang. Core collaborators: Kho Soong Yang, Setoh Kai Heng, Tan Hong Le.
+
+9. Contact Information
+
+For permission requests, licensing inquiries, or authorized usage:
+Email: weejunkang2007@gmail.com
+
+This repository is timestamped by GitHub and protected under Singapore and international copyright law.
+Unauthorized use may result in DMCA takedown actions.
