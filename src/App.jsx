@@ -1,109 +1,115 @@
-import React, { useEffect, useRef, useState } from 'react';
-import MapComponent from './components/MapComponent';
-import UIOverlay from './components/UIOverlay';
-import { SimulationController } from './simulation/SimulationController';
+import React, { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import Navigation from './components/Navigation';
+import LandingHub from './components/LandingHub';
+import SimulationMode from './components/SimulationMode';
+import LiveIncidentMode from './components/LiveIncidentMode';
+import IncidentViewMode from './components/IncidentViewMode';
 
 function App() {
-    const simulationRef = useRef(null);
-    const requestRef = useRef();
-    const lastSafeNodesVersion = useRef(-1);
+    // Modes: 'landing', 'simulation', 'live', 'view'
+    const [currentMode, setCurrentMode] = useState('landing');
+    const [isFormDirty, setIsFormDirty] = useState(false);
 
-    // Simulation State (Synced for Rendering)
-    const [agents, setAgents] = useState([]);
-    const [incidents, setIncidents] = useState([]);
-    const [wind, setWind] = useState({ speed: 0, direction: 0 });
-    const [stats, setStats] = useState({ activeIncidents: 0, safetyIndex: 100 });
-    const [status, setStatus] = useState('Clear');
-    const [safeNodes, setSafeNodes] = useState([]); // Debugging Safe Zones
-    // Theme State: 'light' (Carto Voyager) or 'dark' (Carto Dark Matter)
-    const [mapTheme, setMapTheme] = useState('light');
+    // For Confirmation Modal
+    const [pendingMode, setPendingMode] = useState(null);
+    const [showConfirm, setShowConfirm] = useState(false);
 
-    useEffect(() => {
-        // ... (existing useEffect)
-        // Initialize Simulation
-        simulationRef.current = new SimulationController();
-        // ...
-        syncState();
+    const handleAttemptNavigate = (targetMode) => {
+        if (targetMode === currentMode) return;
 
-        // Start Loop
-        let lastTime = performance.now();
-
-        const animate = (time) => {
-            const dt = (time - lastTime) / 1000;
-            lastTime = time;
-
-            // Update Physics (cap dt to avoid huge jumps if tab inactive)
-            const safeDt = Math.min(dt, 0.1);
-            simulationRef.current.update(safeDt);
-
-            // Sync State
-            syncState();
-
-            requestRef.current = requestAnimationFrame(animate);
-        };
-
-        requestRef.current = requestAnimationFrame(animate);
-
-        return () => {
-            cancelAnimationFrame(requestRef.current);
-        };
-    }, []);
-
-    // ... (syncState, handleAddIncident, handleReset)
-
-    const syncState = () => {
-        if (!simulationRef.current) return;
-        const sim = simulationRef.current;
-        setAgents([...sim.agents]);
-        setIncidents([...sim.incidents]);
-        setWind({ ...sim.wind });
-        setStats(sim.getStats());
-        setStatus(sim.status);
-
-        // Optimized: Only update safeNodes if changed
-        if (sim.safeNodesVersion !== lastSafeNodesVersion.current) {
-            setSafeNodes([...sim.safeNodes]);
-            lastSafeNodesVersion.current = sim.safeNodesVersion;
-            console.log('[DEBUG-App] Synced SafeNodes (Version Change):', sim.safeNodes.length);
+        if (currentMode === 'live' && isFormDirty) {
+            setPendingMode(targetMode);
+            setShowConfirm(true);
+        } else {
+            setCurrentMode(targetMode);
         }
     };
 
-    const handleAddIncident = (coordinate) => {
-        if (simulationRef.current) {
-            simulationRef.current.addIncident(coordinate);
+    const confirmNavigation = () => {
+        if (pendingMode) {
+            setCurrentMode(pendingMode);
+            setIsFormDirty(false); // Reset dirty state
         }
+        setShowConfirm(false);
+        setPendingMode(null);
     };
 
-    const handleReset = () => {
-        if (simulationRef.current) {
-            simulationRef.current.reset();
-        }
-    };
-
-    const toggleTheme = () => {
-        setMapTheme(prev => prev === 'light' ? 'dark' : 'light');
+    const cancelNavigation = () => {
+        setShowConfirm(false);
+        setPendingMode(null);
     };
 
     return (
-        <div className="relative w-full h-full bg-gray-900 overflow-hidden">
-            {/* Map Layer */}
-            <MapComponent
-                agents={agents}
-                incidents={incidents}
-                safeNodes={safeNodes}
-                onAddIncident={handleAddIncident}
-                theme={mapTheme}
+        <div className="w-screen h-screen bg-gray-950 flex flex-col font-sans overflow-hidden text-gray-100 selection:bg-blue-500/30">
+
+            {/* Top Navigation */}
+            <Navigation
+                currentMode={currentMode}
+                onAttemptNavigate={handleAttemptNavigate}
             />
 
-            {/* UI Overlay */}
-            <UIOverlay
-                stats={stats}
-                wind={wind}
-                status={status}
-                onReset={handleReset}
-                theme={mapTheme}
-                onToggleTheme={toggleTheme}
-            />
+            {/* Main Content Area with Routing & Animations */}
+            <div className="flex-1 relative w-full h-full overflow-hidden">
+                <AnimatePresence mode="wait">
+                    {currentMode === 'landing' && (
+                        <LandingHub
+                            key="landing"
+                            onSelectMode={handleAttemptNavigate}
+                        />
+                    )}
+
+                    {currentMode === 'simulation' && (
+                        <SimulationMode
+                            key="simulation"
+                            onExit={() => handleAttemptNavigate('landing')}
+                        />
+                    )}
+
+                    {currentMode === 'live' && (
+                        <LiveIncidentMode
+                            key="live"
+                            onFormStateChange={setIsFormDirty}
+                        />
+                    )}
+
+                    {currentMode === 'view' && (
+                        <IncidentViewMode
+                            key="view"
+                        />
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Unsaved Changes Confirmation Modal */}
+            <AnimatePresence>
+                {showConfirm && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/80 backdrop-blur-sm px-4">
+                        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 max-w-md w-full shadow-2xl origin-bottom">
+                            <h3 className="text-xl font-bold text-white mb-2">Discard Unsaved Changes?</h3>
+                            <p className="text-gray-400 mb-8">
+                                You have partially filled out a live incident log. Navigating away will discard your changes. Are you sure you want to leave?
+                            </p>
+
+                            <div className="flex items-center justify-end gap-3">
+                                <button
+                                    onClick={cancelNavigation}
+                                    className="px-5 py-2.5 rounded-xl font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={confirmNavigation}
+                                    className="px-5 py-2.5 rounded-xl font-medium bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 transition-all"
+                                >
+                                    Discard & Leave
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </AnimatePresence>
+
         </div>
     );
 }

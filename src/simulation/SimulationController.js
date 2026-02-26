@@ -33,15 +33,21 @@ export class SimulationController {
     buildGraph() {
         this.nodes = {};
 
-        // 1. Index Nodes
+        // Create Turf Polygon from PARK_BOUNDS [minLon, minLat, maxLon, maxLat]
+        const polygon = turf.bboxPolygon(PARK_BOUNDS);
+
+        // 1. Index Nodes (Filter by Bounding Box)
         this.rawGraph.nodes.forEach(node => {
-            this.nodes[node.id] = {
-                ...node,
-                neighbors: []
-            };
+            const point = turf.point([node.lon, node.lat]);
+            if (turf.booleanPointInPolygon(point, polygon)) {
+                this.nodes[node.id] = {
+                    ...node,
+                    neighbors: []
+                };
+            }
         });
 
-        // 2. Build Edges (Undirected)
+        // 2. Build Edges (Undirected) - Only if both nodes exist in the filtered set
         this.rawGraph.edges.forEach(edge => {
             const u = this.nodes[edge.source];
             const v = this.nodes[edge.target];
@@ -52,7 +58,56 @@ export class SimulationController {
             }
         });
 
-        console.log(`Graph Built: ${Object.keys(this.nodes).length} nodes.`);
+        // 3. Find Connected Components and Keep Only the Largest
+        let largestComponent = [];
+        const visited = new Set();
+
+        const getComponent = (startNodeId) => {
+            const component = [];
+            const stack = [startNodeId];
+            visited.add(startNodeId);
+
+            while (stack.length > 0) {
+                const currId = stack.pop();
+                component.push(currId);
+                const node = this.nodes[currId];
+                if (node && node.neighbors) {
+                    node.neighbors.forEach(neighborId => {
+                        if (!visited.has(neighborId)) {
+                            visited.add(neighborId);
+                            stack.push(neighborId);
+                        }
+                    });
+                }
+            }
+            return component;
+        };
+
+        const allNodeIds = Object.keys(this.nodes);
+        for (const nodeId of allNodeIds) {
+            if (!visited.has(nodeId)) {
+                const comp = getComponent(nodeId);
+                if (comp.length > largestComponent.length) {
+                    largestComponent = comp;
+                }
+            }
+        }
+
+        // 4. Filter nodes to only keep the largest component
+        const largestSet = new Set(largestComponent);
+        const filteredNodes = {};
+        let edgeCount = 0;
+
+        for (const nodeId of largestComponent) {
+            filteredNodes[nodeId] = this.nodes[nodeId];
+            // Recount edges just for logging
+            edgeCount += this.nodes[nodeId].neighbors.length;
+        }
+        edgeCount = edgeCount / 2; // Undirected graph
+
+        this.nodes = filteredNodes;
+
+        console.log(`Graph Built & Filtered: ${Object.keys(this.nodes).length} nodes, ${edgeCount} edges (Largest Connected Component within bounds).`);
     }
 
     identifyDynamicSafeNodes() {

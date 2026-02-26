@@ -1,11 +1,11 @@
 // Center of West Coast Park (Calculated from user bounds)
 export const PARK_CENTER = [103.76318668868444, 1.2963792786654849]; // [Lon, Lat]
 
-// Approximate bounding box for West Coast Park (Grass/Path area)
+// Approximate bounding box for West Coast Park (Strictly South of West Coast Highway)
 // [MinLon, MinLat, MaxLon, MaxLat]
 export const PARK_BOUNDS = [
-    103.755, 1.285, // MinLon, MinLat (South West)
-    103.780, 1.305  // MaxLon, MaxLat (North East - covers near Clementi Woods)
+    103.7530, 1.2850, // MinLon, MinLat (South West tip near pier, further South for full width)
+    103.7900, 1.3005  // MaxLon, MaxLat (North East, extended East to include the large green area and pond, stopping before Wholesale Center)
 ];
 
 // Exit points (Approximate)

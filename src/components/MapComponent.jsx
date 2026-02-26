@@ -4,7 +4,17 @@ import { PARK_CENTER, PARK_BOUNDS } from '../data/ParkData';
 import ParkGraph from '../data/ParkGraph.json';
 import maplibregl from 'maplibre-gl';
 
-const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'light' }) => {
+const MapComponent = ({
+    agents = [],
+    incidents = [],
+    safeNodes = [],
+    onAddIncident,
+    theme = 'light',
+    mode = 'simulation', // 'simulation', 'live', or 'view'
+    selectedLocation = null,
+    onLocationSelect = null,
+    onIncidentClick = null
+}) => {
     const mapRef = useRef(null);
     const [viewState, setViewState] = useState({
         longitude: PARK_CENTER[0],
@@ -16,14 +26,35 @@ const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'li
 
     const onMove = useCallback(evt => setViewState(evt.viewState), []);
 
-    // Right Click Handler
+    // Right Click Handler (Simulation Mode Quick-Add)
     const handleContextMenu = useCallback((event) => {
-        const { lng, lat } = event.lngLat;
-        if (onAddIncident) {
+        if (mode === 'simulation' && onAddIncident) {
+            const { lng, lat } = event.lngLat;
             onAddIncident([lng, lat]);
         }
         event.originalEvent.preventDefault();
-    }, [onAddIncident]);
+    }, [mode, onAddIncident]);
+
+    // Left Click Handler (Live Mode Selection & View Mode Details)
+    const handleClick = useCallback((event) => {
+        if (mode === 'live' && onLocationSelect) {
+            const { lng, lat } = event.lngLat;
+            onLocationSelect([lng, lat]);
+        } else if (mode === 'view' && onIncidentClick) {
+            const feature = event.features && event.features.find(f => f.layer.id === 'incidents-layer');
+            if (feature) {
+                const details = JSON.parse(feature.properties.details || '{}');
+                onIncidentClick({
+                    id: feature.properties.id,
+                    position: feature.geometry.coordinates,
+                    details: details
+                });
+            } else {
+                // Clicked on empty map, close panel
+                onIncidentClick(null);
+            }
+        }
+    }, [mode, onLocationSelect, onIncidentClick]);
 
     // Select Style based on Theme
     const mapStyleUrl = theme === 'light'
@@ -77,9 +108,27 @@ const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'li
         features: incidents.map(inc => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: inc.position },
-            properties: { radius: inc.radius }
+            properties: {
+                radius: inc.radius,
+                color: inc.color || '#ef4444',
+                id: inc.id,
+                details: inc.details ? JSON.stringify(inc.details) : '{}'
+            }
         }))
     };
+
+    // 4. Selected Location (Live Mode)
+    const selectionGeoJSON = useMemo(() => {
+        if (!selectedLocation) return null;
+        return {
+            type: 'FeatureCollection',
+            features: [{
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: selectedLocation },
+                properties: {}
+            }]
+        };
+    }, [selectedLocation]);
 
     // 5. Safe Nodes (Debug Visualization)
     const safeNodesGeoJSON = useMemo(() => {
@@ -153,11 +202,24 @@ const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'li
         }
     };
 
+    // Style for the currently active pinned location dropping from user click
+    const selectionLayerStyle = {
+        id: 'selection-layer',
+        type: 'circle',
+        paint: {
+            'circle-radius': 10,
+            'circle-color': '#3b82f6', // Blue 500
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': 0.9
+        }
+    };
+
     const incidentsLayerStyle = {
         id: 'incidents-layer',
         type: 'circle',
         paint: {
-            'circle-color': '#ef4444',
+            'circle-color': ['get', 'color'],
             'circle-opacity': 0.4,
             'circle-radius': [
                 'interpolate', ['linear'], ['zoom'],
@@ -176,7 +238,9 @@ const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'li
             style={{ width: '100%', height: '100%' }}
             mapStyle={mapStyleUrl}
             onContextMenu={handleContextMenu}
-            cursor="crosshair"
+            onClick={handleClick}
+            cursor={mode === 'live' ? "pointer" : "crosshair"}
+            interactiveLayerIds={mode === 'view' ? ['incidents-layer'] : undefined}
         >
             <NavigationControl position="top-right" />
             <FullscreenControl position="top-right" />
@@ -197,6 +261,13 @@ const MapComponent = ({ agents, incidents, safeNodes, onAddIncident, theme = 'li
             <Source id="agents-source" type="geojson" data={agentsGeoJSON}>
                 <Layer {...agentsLayerStyle} />
             </Source>
+
+            {/* Selection Pin (Live Mode) */}
+            {selectionGeoJSON && (
+                <Source id="selection-source" type="geojson" data={selectionGeoJSON}>
+                    <Layer {...selectionLayerStyle} />
+                </Source>
+            )}
 
             {/* Safe Nodes (Debug) - Render LAST to be ON TOP */}
             {safeNodesGeoJSON && (
