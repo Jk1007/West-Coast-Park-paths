@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
 import supabase from '../supabase';
 
-const AuthForm = () => {
+const AuthForm = ({ onGuestAccess }) => {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -40,6 +40,7 @@ const AuthForm = () => {
                 });
                 
                 if (signInError) throw signInError;
+                localStorage.removeItem('manually_signed_out');
                 // If successful, App.jsx listener will catch the session change automatically.
             } else {
                 const { error: signUpError } = await supabase.auth.signUp({
@@ -48,6 +49,7 @@ const AuthForm = () => {
                 });
                 
                 if (signUpError) throw signUpError;
+                localStorage.removeItem('manually_signed_out');
                 
                 setSuccessMessage("Registration successful! You can now log in.");
                 setIsLogin(true); // Switch to login view gracefully
@@ -164,6 +166,17 @@ const AuthForm = () => {
                             isLogin ? 'Secure Log In' : 'Register Securely'
                         )}
                     </button>
+
+                    {isLogin && (
+                        <button
+                            type="button"
+                            onClick={onGuestAccess}
+                            className="w-full py-3 px-4 mt-3 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-blue-600 dark:text-blue-400 font-medium rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500/50 shadow-sm transition-all outline-none flex justify-center items-center gap-2"
+                        >
+                            <ShieldCheck className="w-5 h-5" />
+                            Access as Guest (Passwordless)
+                        </button>
+                    )}
                 </form>
 
                 <div className="mt-8 text-center border-t border-gray-100 dark:border-gray-800 pt-6">

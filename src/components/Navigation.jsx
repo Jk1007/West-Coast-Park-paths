@@ -9,6 +9,7 @@ const Navigation = ({ currentMode, onNavigate, onAttemptNavigate, theme, toggleT
     const isLive = currentMode === 'live';
 
     const handleSignOut = async () => {
+        localStorage.setItem('manually_signed_out', 'true');
         await supabase.auth.signOut();
     };
 

@@ -28,12 +28,51 @@ function App() {
     // Auth State
     const [session, setSession] = useState(null);
     const [isAuthLoading, setIsAuthLoading] = useState(true);
+    const [isAutoAuthenticating, setIsAutoAuthenticating] = useState(false);
+    const [autoAuthError, setAutoAuthError] = useState(null);
+
+    const performAutoAuth = async () => {
+        setIsAutoAuthenticating(true);
+        setAutoAuthError(null);
+        try {
+            const email = 'guest@crowdshield.org';
+            const password = 'guestpassword123';
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) {
+                // If user doesn't exist, try signing up first
+                if (error.message.includes("Invalid login credentials") || error.status === 400) {
+                    const { error: signUpError } = await supabase.auth.signUp({ email, password });
+                    if (signUpError) {
+                        throw signUpError;
+                    }
+                    // Try logging in again after signup
+                    const { error: secondSignInError } = await supabase.auth.signInWithPassword({ email, password });
+                    if (secondSignInError) throw secondSignInError;
+                } else {
+                    throw error;
+                }
+            }
+            // Clear manually signed out flag on successful auto authentication
+            localStorage.removeItem('manually_signed_out');
+        } catch (err) {
+            console.error("Auto authentication failed:", err);
+            setAutoAuthError(err.message || "Could not authenticate as guest.");
+        } finally {
+            setIsAutoAuthenticating(false);
+        }
+    };
 
     useEffect(() => {
         // Initial session fetch
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setIsAuthLoading(false);
+
+            // Trigger auto login if not logged in and not manually signed out
+            if (!session && localStorage.getItem('manually_signed_out') !== 'true') {
+                performAutoAuth();
+            }
         });
 
         // Listen for auth changes (login/logout)
@@ -83,16 +122,21 @@ function App() {
         setPendingMode(null);
     };
 
-    if (isAuthLoading) {
+    if (isAuthLoading || isAutoAuthenticating) {
         return (
-            <div className="w-screen h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+            <div className="w-screen h-screen bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center gap-4">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                {isAutoAuthenticating && (
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 animate-pulse">
+                        Authenticating guest session...
+                    </p>
+                )}
             </div>
         );
     }
 
     if (!session) {
-        return <AuthForm />;
+        return <AuthForm onGuestAccess={performAutoAuth} />;
     }
 
     return (
