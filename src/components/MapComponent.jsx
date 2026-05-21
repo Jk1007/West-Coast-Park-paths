@@ -13,6 +13,7 @@ const MapComponent = forwardRef(({
     safeNodes = [],
     wind = { speed: 0, direction: 0 },
     onAddIncident,
+    onAddIncidentDirect,
     theme = 'light',
     mode = 'simulation', 
     selectedLocation = null,
@@ -38,10 +39,125 @@ const MapComponent = forwardRef(({
         smoothedDistance: 0,
         wasPinching: false,
         lastWindSpeed: -1,
-        lastWindDir: -1
+        lastWindDir: -1,
+        hoverStart: null
     });
 
     const fistDebounceRef = useRef(0);
+
+    // --- 3-Step Gesture Pipeline States & Refs ---
+    const [gestureMode, setGestureMode] = useState('navigate'); // 'navigate' | 'placement'
+    const [pipelineStep, setPipelineStep] = useState(null); // null | 'aiming' | 'selecting'
+    const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+    const [lockedPos, setLockedPos] = useState(null);
+    const [lockedLngLat, setLockedLngLat] = useState(null);
+    const [hoveredBtnId, setHoveredBtnId] = useState(null);
+    const [hoverProgress, setHoverProgress] = useState(0);
+
+    const pipelineRef = useRef({
+        gestureMode: 'navigate',
+        pipelineStep: null,
+        cursorPos: { x: 0, y: 0 },
+        lockedPos: null,
+        lockedLngLat: null,
+        hoveredBtnId: null,
+        hoverProgress: 0,
+        wasPinching: false
+    });
+
+    const confirmSelectionRef = useRef(null);
+    const containerRef = useRef(null);
+
+    // Sync pipeline state with refs for event loop stability
+    useEffect(() => { pipelineRef.current.gestureMode = gestureMode; }, [gestureMode]);
+    useEffect(() => { pipelineRef.current.pipelineStep = pipelineStep; }, [pipelineStep]);
+    useEffect(() => { pipelineRef.current.cursorPos = cursorPos; }, [cursorPos]);
+    useEffect(() => { pipelineRef.current.lockedPos = lockedPos; }, [lockedPos]);
+    useEffect(() => { pipelineRef.current.lockedLngLat = lockedLngLat; }, [lockedLngLat]);
+    useEffect(() => { pipelineRef.current.hoveredBtnId = hoveredBtnId; }, [hoveredBtnId]);
+    useEffect(() => { pipelineRef.current.hoverProgress = hoverProgress; }, [hoverProgress]);
+
+    // Handle pipeline modes cleanup & reset
+    useEffect(() => {
+        if (gestureMode === 'placement') {
+            setPipelineStep('aiming');
+        } else {
+            setPipelineStep(null);
+            setLockedPos(null);
+            setLockedLngLat(null);
+            setHoveredBtnId(null);
+            setHoverProgress(0);
+        }
+    }, [gestureMode]);
+
+    // Web Audio Synthesizer
+    const playSound = (type) => {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            
+            if (type === 'click') {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.08);
+            } else if (type === 'chime') {
+                const now = ctx.currentTime;
+                const playTone = (freq, start, duration) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, start);
+                    osc.frequency.exponentialRampToValueAtTime(freq * 1.5, start + duration);
+                    gain.gain.setValueAtTime(0.1, start);
+                    gain.gain.exponentialRampToValueAtTime(0.01, start + duration);
+                    osc.start(start);
+                    osc.stop(start + duration);
+                };
+                playTone(523.25, now, 0.3); // C5
+                playTone(659.25, now + 0.05, 0.35); // E5
+                playTone(783.99, now + 0.1, 0.4); // G5
+                playTone(1046.50, now + 0.15, 0.5); // C6
+            }
+        } catch (e) {
+            console.error('Failed to play synthesized sound:', e);
+        }
+    };
+
+    const handleConfirmSelection = useCallback((btnId) => {
+        if (btnId === 'cancel') {
+            setPipelineStep('aiming');
+            setLockedPos(null);
+            setLockedLngLat(null);
+            setHoveredBtnId(null);
+            setHoverProgress(0);
+            playSound('click');
+        } else {
+            if (onAddIncidentDirect && pipelineRef.current.lockedLngLat) {
+                onAddIncidentDirect(pipelineRef.current.lockedLngLat, btnId);
+                playSound('chime');
+            }
+            setPipelineStep('aiming');
+            setLockedPos(null);
+            setLockedLngLat(null);
+            setHoveredBtnId(null);
+            setHoverProgress(0);
+        }
+    }, [onAddIncidentDirect]);
+
+    useEffect(() => {
+        confirmSelectionRef.current = handleConfirmSelection;
+    }, [handleConfirmSelection]);
 
     // Provide map access upwards functionally
     useImperativeHandle(ref, () => ({
@@ -80,76 +196,159 @@ const MapComponent = forwardRef(({
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                        if (data.wind && onWindChange) {
-                            if (data.wind.speed !== stateRef.current.lastWindSpeed || 
-                                data.wind.direction !== stateRef.current.lastWindDir) {
-                                stateRef.current.lastWindSpeed = data.wind.speed;
-                                stateRef.current.lastWindDir = data.wind.direction;
-                                onWindChange({
-                                    ...data.wind,
-                                    weather: { 
-                                        temp: data.wind.temp, 
-                                        rain: data.wind.rain, 
-                                        hum: data.wind.hum 
-                                    }
-                                });
-                            }
+                    if (data.wind && onWindChange) {
+                        if (data.wind.speed !== stateRef.current.lastWindSpeed || 
+                            data.wind.direction !== stateRef.current.lastWindDir) {
+                            stateRef.current.lastWindSpeed = data.wind.speed;
+                            stateRef.current.lastWindDir = data.wind.direction;
+                            onWindChange({
+                                ...data.wind,
+                                weather: { 
+                                    temp: data.wind.temp, 
+                                    rain: data.wind.rain, 
+                                    hum: data.wind.hum 
+                                }
+                            });
                         }
+                    }
 
-                        if (data.detected) {
-                        // 1. FIST STOP LOGIC: If fist is closed, we freeze everything
-                        if (data.isFist) {
-                            stateRef.current.prevIndex = null;
-                            stateRef.current.prevDistance = null;
-                            if (stateRef.current.handDetected) {
-                                stateRef.current.handDetected = true; // Still detected but "stopping"
-                            }
-                            return; 
-                        }
-
+                    if (data.detected) {
                         if (!stateRef.current.handDetected) {
                             stateRef.current.handDetected = true;
                             if (onHandStatusChange) onHandStatusChange(true);
                         }
 
+                        // 1. FIST STOP LOGIC: If fist is closed, we freeze everything
+                        if (data.isFist) {
+                            stateRef.current.prevIndex = null;
+                            stateRef.current.prevDistance = null;
+                            return; 
+                        }
+
                         const map = mapRef.current?.getMap();
                         if (!map) return;
 
-                        // 2. PAN LOGIC (Hand Index Finger)
-                        const ALPHA = 0.1; 
-                        stateRef.current.smoothedIndex.x += ALPHA * (data.targetX - stateRef.current.smoothedIndex.x);
-                        stateRef.current.smoothedIndex.y += ALPHA * (data.targetY - stateRef.current.smoothedIndex.y);
-                        const sIndex = stateRef.current.smoothedIndex;
+                        // Get map container bounding rect to scale coordinates
+                        const container = map.getContainer();
+                        const rect = container.getBoundingClientRect();
+                        const screenX = (data.targetX / 1000) * rect.width;
+                        const screenY = (data.targetY / 1000) * rect.height;
 
-                        if (stateRef.current.prevIndex) {
-                            const dx = sIndex.x - stateRef.current.prevIndex.x;
-                            const dy = sIndex.y - stateRef.current.prevIndex.y;
-                            const PAN_SENSITIVITY = 0.6; 
-                            const offsetX = -dx * PAN_SENSITIVITY;
-                            const offsetY = -dy * PAN_SENSITIVITY;
+                        // Exponential Moving Average (EMA) cursor position smoothing
+                        const CURSOR_ALPHA = 0.25;
+                        const prevPos = pipelineRef.current.cursorPos;
+                        const smoothedX = prevPos.x + CURSOR_ALPHA * (screenX - prevPos.x);
+                        const smoothedY = prevPos.y + CURSOR_ALPHA * (screenY - prevPos.y);
+                        const smoothedPos = { x: smoothedX, y: smoothedY };
+                        setCursorPos(smoothedPos);
 
-                            if (Math.abs(offsetX) > 1.5 || Math.abs(offsetY) > 1.5) {
-                                map.panBy([offsetX, offsetY], { animate: false });
+                        // Pinch transition detection
+                        const isPinching = data.dist < 0.055;
+                        const wasPinching = pipelineRef.current.wasPinching;
+                        pipelineRef.current.wasPinching = isPinching;
+                        const didAirTap = isPinching && !wasPinching;
+
+                        const currentMode = pipelineRef.current.gestureMode;
+                        const currentStep = pipelineRef.current.pipelineStep;
+
+                        if (currentMode === 'navigate') {
+                            // 2. PAN LOGIC (Hand Index Finger)
+                            const ALPHA = 0.1; 
+                            stateRef.current.smoothedIndex.x += ALPHA * (data.targetX - stateRef.current.smoothedIndex.x);
+                            stateRef.current.smoothedIndex.y += ALPHA * (data.targetY - stateRef.current.smoothedIndex.y);
+                            const sIndex = stateRef.current.smoothedIndex;
+
+                            if (stateRef.current.prevIndex) {
+                                const dx = sIndex.x - stateRef.current.prevIndex.x;
+                                const dy = sIndex.y - stateRef.current.prevIndex.y;
+                                const PAN_SENSITIVITY = 0.6; 
+                                const offsetX = -dx * PAN_SENSITIVITY;
+                                const offsetY = -dy * PAN_SENSITIVITY;
+
+                                if (Math.abs(offsetX) > 1.5 || Math.abs(offsetY) > 1.5) {
+                                    map.panBy([offsetX, offsetY], { animate: false });
+                                }
+                            }
+                            stateRef.current.prevIndex = { x: sIndex.x, y: sIndex.y };
+
+                            // 3. ZOOM LOGIC (Thumb to Index Distance)
+                            const ZOOM_ALPHA = 0.08; 
+                            stateRef.current.smoothedDistance = stateRef.current.smoothedDistance === 0 
+                                ? data.dist 
+                                : stateRef.current.smoothedDistance + ZOOM_ALPHA * (data.dist - stateRef.current.smoothedDistance);
+                            const sDist = stateRef.current.smoothedDistance;
+
+                            if (stateRef.current.prevDistance !== null) {
+                                const dDist = sDist - stateRef.current.prevDistance;
+                                const ZOOM_SENSITIVITY = 6; 
+                                if (Math.abs(dDist) > 0.005) { 
+                                    const currentZoom = map.getZoom();
+                                    map.jumpTo({ zoom: currentZoom + (dDist * ZOOM_SENSITIVITY), center: map.getCenter() });
+                                }
+                            }
+                            stateRef.current.prevDistance = sDist;
+                        } 
+                        else if (currentMode === 'placement') {
+                            stateRef.current.prevIndex = null;
+                            stateRef.current.prevDistance = null;
+
+                            if (currentStep === 'aiming') {
+                                if (didAirTap) {
+                                    const lngLat = map.unproject([smoothedPos.x, smoothedPos.y]);
+                                    playSound('click');
+                                    setLockedPos(smoothedPos);
+                                    setLockedLngLat([lngLat.lng, lngLat.lat]);
+                                    setPipelineStep('selecting');
+                                    setHoveredBtnId(null);
+                                    setHoverProgress(0);
+                                }
+                            } 
+                            else if (currentStep === 'selecting') {
+                                // Determine hovered element
+                                const clientX = rect.left + smoothedPos.x;
+                                const clientY = rect.top + smoothedPos.y;
+                                const elem = document.elementFromPoint(clientX, clientY);
+
+                                let currentHoverBtn = null;
+                                if (elem) {
+                                    const btn = elem.closest('[data-gesture-btn]');
+                                    if (btn) {
+                                        currentHoverBtn = btn.getAttribute('data-gesture-btn');
+                                    }
+                                }
+
+                                const prevHoverBtn = pipelineRef.current.hoveredBtnId;
+                                if (currentHoverBtn !== prevHoverBtn) {
+                                    setHoveredBtnId(currentHoverBtn);
+                                    setHoverProgress(0);
+                                    if (currentHoverBtn) {
+                                        stateRef.current.hoverStart = Date.now();
+                                    } else {
+                                        stateRef.current.hoverStart = null;
+                                    }
+                                } else if (currentHoverBtn) {
+                                    if (stateRef.current.hoverStart) {
+                                        const elapsed = Date.now() - stateRef.current.hoverStart;
+                                        const progress = Math.min((elapsed / 1200) * 100, 100);
+                                        setHoverProgress(progress);
+
+                                        if (progress >= 100) {
+                                            stateRef.current.hoverStart = null;
+                                            if (confirmSelectionRef.current) {
+                                                confirmSelectionRef.current(currentHoverBtn);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (didAirTap && currentHoverBtn) {
+                                    stateRef.current.hoverStart = null;
+                                    if (confirmSelectionRef.current) {
+                                        confirmSelectionRef.current(currentHoverBtn);
+                                    }
+                                }
                             }
                         }
-                        stateRef.current.prevIndex = { x: sIndex.x, y: sIndex.y };
-
-                        // 3. ZOOM LOGIC (Thumb to Index Distance)
-                        const ZOOM_ALPHA = 0.08; 
-                        stateRef.current.smoothedDistance = stateRef.current.smoothedDistance === 0 
-                            ? data.dist 
-                            : stateRef.current.smoothedDistance + ZOOM_ALPHA * (data.dist - stateRef.current.smoothedDistance);
-                        const sDist = stateRef.current.smoothedDistance;
-
-                        if (stateRef.current.prevDistance !== null) {
-                            const dDist = sDist - stateRef.current.prevDistance;
-                            const ZOOM_SENSITIVITY = 6; 
-                            if (Math.abs(dDist) > 0.005) { 
-                                const currentZoom = map.getZoom();
-                                map.jumpTo({ zoom: currentZoom + (dDist * ZOOM_SENSITIVITY), center: map.getCenter() });
-                            }
-                        }
-                        stateRef.current.prevDistance = sDist;
                     } else {
                         if (stateRef.current.handDetected) {
                             stateRef.current.handDetected = false;
@@ -175,7 +374,6 @@ const MapComponent = forwardRef(({
                     if (onHandStatusChange) onHandStatusChange(false);
                 }
                 
-                // Reconnect after 3 seconds if still enabled
                 if (gesturesEnabled) {
                     reconnectTimer = setTimeout(connect, 3000);
                 }
@@ -200,7 +398,7 @@ const MapComponent = forwardRef(({
                 if (onHandStatusChange) onHandStatusChange(false);
             }
         };
-    }, [gesturesEnabled, onAddIncident, onWindChange, onHandStatusChange]);
+    }, [gesturesEnabled, onAddIncident, onAddIncidentDirect, onWindChange, onHandStatusChange]);
 
     const toggleGestures = useCallback(() => {
         setGesturesEnabled(prev => !prev);
@@ -357,7 +555,7 @@ const MapComponent = forwardRef(({
 
 
     return (
-        <div className="relative w-full h-full">
+        <div ref={containerRef} className="relative w-full h-full">
             <Map
                 initialViewState={initialViewState}
                 ref={mapRef}
@@ -399,11 +597,109 @@ const MapComponent = forwardRef(({
                 )}
             </Map>
 
-            {/* Websocket Connection UI */}
-            <div className="absolute bottom-6 left-6 flex gap-2 z-50">
+            {/* Custom Sci-Fi Hologram Cursor/Reticle Overlays */}
+            {gesturesEnabled && stateRef.current.handDetected && (
+                <div
+                    className="absolute w-8 h-8 pointer-events-none z-[100] transition-transform duration-75"
+                    style={{
+                        left: `${cursorPos.x}px`,
+                        top: `${cursorPos.y}px`,
+                        transform: 'translate(-50%, -50%)'
+                    }}
+                >
+                    {/* Outer glowing pulsing ring */}
+                    <div className="absolute inset-0 rounded-full border-2 border-cyan-400/80 bg-cyan-500/10 animate-pulse" />
+                    {/* Inner glowing core */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-cyan-400 rounded-full shadow-[0_0_10px_#22d3ee]" />
+                </div>
+            )}
+
+            {/* Aiming Reticle Phase */}
+            {gestureMode === 'placement' && pipelineStep === 'aiming' && (
+                <div
+                    className="absolute pointer-events-none z-[90]"
+                    style={{
+                        left: `${cursorPos.x}px`,
+                        top: `${cursorPos.y}px`,
+                        transform: 'translate(-50%, -50%)'
+                    }}
+                >
+                    <div className="w-16 h-16 border-2 border-dashed border-red-500/60 rounded-full animate-spin [animation-duration:8s]" />
+                    <div className="absolute inset-2 border border-red-500/40 rounded-full animate-ping [animation-duration:2s]" />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-red-600 rounded-full shadow-[0_0_8px_#dc2626]" />
+                    
+                    <div className="absolute top-12 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white border border-slate-700 px-3 py-1 rounded text-[10px] font-bold tracking-wider whitespace-nowrap shadow-lg uppercase">
+                        Pinch (Air Tap) to Lock Position
+                    </div>
+                </div>
+            )}
+
+            {/* Selecting Phase - Locked Reticle and Option Menu */}
+            {gestureMode === 'placement' && pipelineStep === 'selecting' && lockedPos && (
+                <>
+                    {/* Locked geographical marker */}
+                    <div
+                        className="absolute pointer-events-none z-[90]"
+                        style={{
+                            left: `${lockedPos.x}px`,
+                            top: `${lockedPos.y}px`,
+                            transform: 'translate(-50%, -50%)'
+                        }}
+                    >
+                        <div className="w-16 h-16 border-2 border-emerald-500/80 rounded-full shadow-[0_0_12px_rgba(16,185,129,0.4)]" />
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-emerald-500/30 rounded-full animate-ping" />
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-emerald-600 rounded-full shadow-[0_0_8px_#10b981]" />
+                    </div>
+
+                    {/* Floating Options Menu */}
+                    <div
+                        className="absolute z-[95] backdrop-blur-md bg-slate-950/90 border border-slate-800 rounded-2xl p-4 shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col gap-2 w-64 select-none"
+                        style={{
+                            left: `${lockedPos.x}px`,
+                            top: `${lockedPos.y}px`,
+                            transform: 'translate(-50%, -120%)'
+                        }}
+                    >
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2 mb-1">
+                            Deploy Spill Payload
+                        </div>
+
+                        {[
+                            { id: 'CHLORINE_GAS', label: 'Chlorine Gas (Cl2)' },
+                            { id: 'AMMONIA', label: 'Anhydrous Ammonia (NH3)' },
+                            { id: 'METHANE_LEAK', label: 'Methane Pipeline Leak' },
+                            { id: 'INDUSTRIAL_FIRE', label: 'Industrial Toxic Fire' },
+                            { id: 'cancel', label: 'Cancel' }
+                        ].map((btn) => (
+                            <button
+                                key={btn.id}
+                                data-gesture-btn={btn.id}
+                                className={`relative overflow-hidden w-full px-3 py-2 rounded-xl text-left text-xs font-semibold tracking-wide transition-all duration-200 border cursor-pointer ${
+                                    hoveredBtnId === btn.id
+                                        ? btn.id === 'cancel'
+                                            ? 'bg-slate-700/30 text-white border-slate-500 scale-[1.02]'
+                                            : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 scale-[1.02]'
+                                        : 'text-slate-300 border-slate-800/80 bg-slate-900/40'
+                                }`}
+                            >
+                                <span className="relative z-10">{btn.label}</span>
+                                {hoveredBtnId === btn.id && (
+                                    <div 
+                                        className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-75"
+                                        style={{ width: `${hoverProgress}%` }}
+                                    />
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                </>
+            )}
+
+            {/* Websocket Connection UI & Mode Selectors */}
+            <div className="absolute bottom-6 left-6 flex gap-3 z-50">
                 <button
                     onClick={toggleGestures}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium shadow-lg transition-all border ${
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold shadow-lg transition-all border text-xs uppercase tracking-wider ${
                         gesturesEnabled
                             ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500'
                             : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
@@ -412,6 +708,31 @@ const MapComponent = forwardRef(({
                     <Hand className="w-5 h-5" />
                     {gesturesEnabled ? 'Disconnect AI Tracker' : 'Enable AI Tracker'}
                 </button>
+
+                {gesturesEnabled && (
+                    <div className="flex bg-slate-900/90 backdrop-blur-md p-1 rounded-full border border-slate-700/50 shadow-lg select-none">
+                        <button
+                            onClick={() => setGestureMode('navigate')}
+                            className={`px-4 py-1.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                                gestureMode === 'navigate'
+                                    ? 'bg-blue-600 text-white shadow-md'
+                                    : 'text-slate-400 hover:text-white'
+                            }`}
+                        >
+                            Navigate
+                        </button>
+                        <button
+                            onClick={() => setGestureMode('placement')}
+                            className={`px-4 py-1.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                                gestureMode === 'placement'
+                                    ? 'bg-red-600 text-white shadow-md'
+                                    : 'text-slate-400 hover:text-white'
+                            }`}
+                        >
+                            Place Hazard
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Backend Headless Indicator Box */}

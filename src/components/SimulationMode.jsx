@@ -128,6 +128,20 @@ const SimulationMode = ({ onExit, theme }) => {
         setPendingIncidentCoord(coordinate);
     }, []);
 
+    const handleAddIncidentDirect = React.useCallback((coordinate, type) => {
+        if (simulationRef.current) {
+            const config = HAZARD_DATABASE[type];
+            const payload = {
+                title: config ? config.name : 'Direct Incident',
+                type: type,
+                amount: 100, // Default spill amount
+                desc: config ? config.description : 'Added via Hand Gestures'
+            };
+            simulationRef.current.addIncident(coordinate, payload);
+            syncState();
+        }
+    }, []);
+
     const confirmAddIncident = React.useCallback((e) => {
         e.preventDefault();
         if (simulationRef.current && pendingIncidentCoord) {
@@ -310,6 +324,7 @@ const SimulationMode = ({ onExit, theme }) => {
                     isNightMode={isNightMode}
                     onWindChange={handleWindChange}
                     onLocationSelect={handleAddIncident}
+                    onAddIncidentDirect={handleAddIncidentDirect}
                     onHandStatusChange={setIsHandDetected}
                     theme={theme}
                 />

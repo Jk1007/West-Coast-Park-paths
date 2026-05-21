@@ -392,6 +392,41 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
         setWind(prev => ({ ...prev, ...newWind }));
     }, []);
 
+    const handleAddIncidentDirect = useCallback(async (coordinate, type) => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const userId = user ? user.id : null;
+
+            if (!userId) {
+                alert("You must be logged in to report an incident.");
+                return;
+            }
+
+            const config = HAZARD_DATABASE[type];
+            const payload = {
+                title: config ? config.name : 'Direct Incident',
+                description: config ? config.description : 'Added via Hand Gestures',
+                others: null,
+                severity: 'Critical',
+                type: type,
+                status: 'Ongoing',
+                amount: 100,
+                user_id: userId,
+                coordinates: coordinate
+            };
+
+            const { error } = await supabase
+                .from('incidents')
+                .insert([payload]);
+
+            if (error) throw error;
+            console.log("Incident successfully written to database directly via gesture menu.");
+        } catch (error) {
+            console.error("Error writing direct incident to Supabase Database: ", error);
+            alert(`Direct Submission Error: ${error.message}`);
+        }
+    }, []);
+
     return (
         <div className="w-full h-full relative overflow-hidden bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
 
@@ -402,6 +437,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                 wind={wind}
                 selectedLocation={selectedLocation}
                 onLocationSelect={handleMapClick}
+                onAddIncidentDirect={handleAddIncidentDirect}
                 onIncidentClick={handleIncidentClick}
                 onWindChange={handleWindChange}
                 incidents={mapIncidents}
