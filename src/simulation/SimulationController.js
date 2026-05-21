@@ -133,7 +133,9 @@ export class SimulationController {
     }
 
     identifyDynamicSafeNodes() {
-        if (this.incidents.length === 0) {
+        // Only count ongoing incidents
+        const activeIncidents = this.incidents.filter(inc => inc.details?.status !== 'Resolved');
+        if (activeIncidents.length === 0) {
             this.safeNodes = [];
             this.safeNodesVersion++;
             return;
@@ -151,6 +153,7 @@ export class SimulationController {
             let minDistToAnyIncident = Infinity;
 
             for (const incident of this.incidents) {
+                if (incident.details?.status === 'Resolved') continue;
                 const [iLon, iLat] = incident.position;
                 const dLat = (node.lat - iLat) * latScale;
                 const dLon = (node.lon - iLon) * lonScale;
@@ -393,7 +396,10 @@ export class SimulationController {
             radius: initialRadius,
             opacity: 0.8,
             color: color,
-            details: payload || {}
+            details: {
+                ...payload,
+                status: payload?.status || 'In-progress' // default to In-progress
+            }
         });
         this.status = 'Evacuating';
 
@@ -402,6 +408,36 @@ export class SimulationController {
 
         // Trigger Evacuation Pathfinding for all agents
         this.recalculatePaths();
+    }
+
+    resolveIncident(incidentId) {
+        const incident = this.incidents.find(inc => inc.id === incidentId);
+        if (incident) {
+            if (!incident.details) incident.details = {};
+            incident.details.status = 'Resolved';
+            incident.color = '#10b981';
+            incident.details.resolvedAt = new Date().toISOString();
+            incident.resolvedAt = incident.details.resolvedAt;
+
+            // Re-identify safe nodes
+            this.identifyDynamicSafeNodes();
+
+            // Check if all incidents are resolved
+            const activeCount = this.incidents.filter(inc => inc.details?.status !== 'Resolved').length;
+            if (activeCount === 0) {
+                this.status = 'Clear';
+                // Reset agents back to IDLE
+                this.agents.forEach(agent => {
+                    if (agent.state === 'EVACUATING') {
+                        agent.state = 'IDLE';
+                        agent.targetNodeId = null;
+                        agent.path = [];
+                    }
+                });
+            } else {
+                this.recalculatePaths();
+            }
+        }
     }
 
     reset() {
@@ -420,7 +456,7 @@ export class SimulationController {
         const safetyIndex = totalAgents > 0 ? (safeAgents / totalAgents) * 100 : 0;
 
         return {
-            activeIncidents: this.incidents.length,
+            activeIncidents: this.incidents.filter(inc => inc.details?.status !== 'Resolved').length,
             safetyIndex: Math.round(safetyIndex),
         };
     }
@@ -558,6 +594,9 @@ export class SimulationController {
 
         // Update incidents (grow plume and apply wind drift)
         this.incidents.forEach(incident => {
+            if (incident.details?.status === 'Resolved') {
+                return; // Stop growing and stop wind drift
+            }
             // Track physical time strictly for Square Root expansion mechanics
             incident.elapsedSimSec += (dt * TIME_SCALE);
 

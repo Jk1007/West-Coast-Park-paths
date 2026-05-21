@@ -142,6 +142,13 @@ const SimulationMode = ({ onExit, theme }) => {
         }
     }, []);
 
+    const handleResolveIncident = React.useCallback((incidentId) => {
+        if (simulationRef.current) {
+            simulationRef.current.resolveIncident(incidentId);
+            syncState();
+        }
+    }, []);
+
     const confirmAddIncident = React.useCallback((e) => {
         e.preventDefault();
         if (simulationRef.current && pendingIncidentCoord) {
@@ -325,6 +332,7 @@ const SimulationMode = ({ onExit, theme }) => {
                     onWindChange={handleWindChange}
                     onLocationSelect={handleAddIncident}
                     onAddIncidentDirect={handleAddIncidentDirect}
+                    onResolveIncident={handleResolveIncident}
                     onHandStatusChange={setIsHandDetected}
                     theme={theme}
                 />

@@ -4,8 +4,9 @@ import * as turf from '@turf/turf';
 import { PARK_CENTER, PARK_BOUNDS } from '../data/ParkData';
 import ParkGraph from '../data/ParkGraph.json';
 import maplibregl from 'maplibre-gl';
-import { Hand, Terminal } from 'lucide-react';
+import { Hand, Terminal, CheckCircle2 } from 'lucide-react';
 import { PlumeLayer } from './PlumeLayer';
+import { PlumePhysics, CHEMICAL_Q_RATES } from '../simulation/PlumePhysics';
 
 const MapComponent = forwardRef(({
     agents = [],
@@ -14,6 +15,7 @@ const MapComponent = forwardRef(({
     wind = { speed: 0, direction: 0 },
     onAddIncident,
     onAddIncidentDirect,
+    onResolveIncident,
     theme = 'light',
     mode = 'simulation', 
     selectedLocation = null,
@@ -66,6 +68,7 @@ const MapComponent = forwardRef(({
 
     const confirmSelectionRef = useRef(null);
     const containerRef = useRef(null);
+    const closeTimeoutRef = useRef(null);
 
     // Sync pipeline state with refs for event loop stability
     useEffect(() => { pipelineRef.current.pipelineStep = pipelineStep; }, [pipelineStep]);
@@ -75,6 +78,128 @@ const MapComponent = forwardRef(({
     useEffect(() => { pipelineRef.current.hoveredBtnId = hoveredBtnId; }, [hoveredBtnId]);
     useEffect(() => { pipelineRef.current.hoverProgress = hoverProgress; }, [hoverProgress]);
 
+    const [hoveredIncident, setHoveredIncident] = useState(null);
+
+    const formatDuration = useCallback((inc) => {
+        let seconds = 0;
+        const startTs = new Date(inc.details?.timestamp || inc.startTime).getTime();
+        const endTs = new Date(inc.details?.resolvedAt || inc.resolvedAt).getTime();
+        if (!isNaN(startTs) && !isNaN(endTs)) {
+            seconds = Math.round((endTs - startTs) / 1000);
+        } else if (inc.elapsedSimSec) {
+            seconds = Math.round(inc.elapsedSimSec);
+        } else if (!isNaN(startTs)) {
+            seconds = Math.round((Date.now() - startTs) / 1000);
+        }
+        
+        if (seconds <= 0) return '0s';
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        
+        let parts = [];
+        if (hrs > 0) parts.push(`${hrs}h`);
+        if (mins > 0) parts.push(`${mins}m`);
+        if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+        return parts.join(' ');
+    }, []);
+
+    const checkHoverAtPoint = useCallback((point, clientX, clientY) => {
+        const map = mapRef.current?.getMap();
+        if (!map) return;
+
+        // Check if cursor is over the tooltip first to ensure hover stability
+        if (clientX !== undefined && clientY !== undefined) {
+            const elem = document.elementFromPoint(clientX, clientY);
+            if (elem && elem.closest('[data-hazard-tooltip]')) {
+                if (closeTimeoutRef.current) {
+                    clearTimeout(closeTimeoutRef.current);
+                    closeTimeoutRef.current = null;
+                }
+                return;
+            }
+        }
+
+        try {
+            const queryPoint = Array.isArray(point) 
+                ? point 
+                : (point && typeof point.x === 'number' && typeof point.y === 'number' ? [point.x, point.y] : point);
+
+            const lngLat = map.unproject(queryPoint);
+            const cursorPt = turf.point([lngLat.lng, lngLat.lat]);
+            let foundInc = null;
+
+            for (const inc of incidents) {
+                const stability = isNightMode ? 'F' : 'D';
+                const baseQ = CHEMICAL_Q_RATES[inc.details?.type] || CHEMICAL_Q_RATES.CHLORINE_GAS; 
+                const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
+                const Q = baseQ * Math.pow(massRatio, 1.25);
+                
+                const polyCoords = PlumePhysics.generatePlumePolygon(
+                    inc.position, 
+                    wind.speed, 
+                    wind.direction, 
+                    Q, 
+                    stability,
+                    inc.elapsedSimSec || 0
+                );
+
+                if (polyCoords && polyCoords.length > 2) {
+                    const poly = turf.polygon([polyCoords]);
+                    if (turf.booleanPointInPolygon(cursorPt, poly)) {
+                        foundInc = inc;
+                        break;
+                    }
+                }
+            }
+
+            if (foundInc) {
+                if (closeTimeoutRef.current) {
+                    clearTimeout(closeTimeoutRef.current);
+                    closeTimeoutRef.current = null;
+                }
+                setHoveredIncident(foundInc);
+                return;
+            }
+        } catch (e) {
+            console.error("Turf hover collision detection failed, falling back to queryRenderedFeatures:", e);
+        }
+
+        // Fallback: queryRenderedFeatures
+        try {
+            const queryPoint = Array.isArray(point) 
+                ? point 
+                : (point && typeof point.x === 'number' && typeof point.y === 'number' ? [point.x, point.y] : point);
+
+            const features = map.queryRenderedFeatures(queryPoint, {
+                layers: ['gaussian-plume-layer']
+            });
+
+            if (features && features.length > 0) {
+                const featureId = features[0].properties.id;
+                const inc = incidents.find(i => i.id === featureId);
+                if (inc) {
+                    if (closeTimeoutRef.current) {
+                        clearTimeout(closeTimeoutRef.current);
+                        closeTimeoutRef.current = null;
+                    }
+                    setHoveredIncident(inc);
+                    return;
+                }
+            }
+        } catch (e) {
+            // Ignore
+        }
+
+        // If not hovering a plume and not over the tooltip, clear hover with debounce
+        if (!closeTimeoutRef.current) {
+            closeTimeoutRef.current = setTimeout(() => {
+                setHoveredIncident(null);
+                closeTimeoutRef.current = null;
+            }, 600); // 600ms grace period to cross the gap or interact
+        }
+    }, [incidents, wind, isNightMode]);
+
     // Handle pipeline modes cleanup & reset when gestures are toggled off
     useEffect(() => {
         if (!gesturesEnabled) {
@@ -83,8 +208,17 @@ const MapComponent = forwardRef(({
             setLockedLngLat(null);
             setHoveredBtnId(null);
             setHoverProgress(0);
+            setHoveredIncident(null);
         }
     }, [gesturesEnabled]);
+
+    useEffect(() => {
+        return () => {
+            if (closeTimeoutRef.current) {
+                clearTimeout(closeTimeoutRef.current);
+            }
+        };
+    }, []);
 
     // Web Audio Synthesizer
     const playSound = (type) => {
@@ -131,7 +265,20 @@ const MapComponent = forwardRef(({
     };
 
     const handleConfirmSelection = useCallback((btnId) => {
-        if (btnId === 'cancel') {
+        if (btnId.startsWith('resolve-')) {
+            const incidentId = btnId.replace('resolve-', '');
+            if (onResolveIncident) {
+                onResolveIncident(incidentId);
+            }
+            playSound('chime');
+            setHoveredIncident(null);
+            setHoveredBtnId(null);
+            setHoverProgress(0);
+            if (closeTimeoutRef.current) {
+                clearTimeout(closeTimeoutRef.current);
+                closeTimeoutRef.current = null;
+            }
+        } else if (btnId === 'cancel') {
             setPipelineStep(null);
             setLockedPos(null);
             setLockedLngLat(null);
@@ -152,7 +299,7 @@ const MapComponent = forwardRef(({
         // Reset movement states to prevent map panning jumps upon menu closing
         stateRef.current.prevIndex = null;
         stateRef.current.prevDistance = null;
-    }, [onAddIncidentDirect]);
+    }, [onAddIncidentDirect, onResolveIncident]);
 
     useEffect(() => {
         confirmSelectionRef.current = handleConfirmSelection;
@@ -249,7 +396,58 @@ const MapComponent = forwardRef(({
 
                         const currentStep = pipelineRef.current.pipelineStep;
 
-                        if (currentStep === null) {
+                        // Universally check if cursor is over a map plume to trigger hover tooltip
+                        checkHoverAtPoint(smoothedPos, rect.left + smoothedPos.x, rect.top + smoothedPos.y);
+
+                        // Universally check if cursor is over a gesture button
+                        const clientX = rect.left + smoothedPos.x;
+                        const clientY = rect.top + smoothedPos.y;
+                        const elem = document.elementFromPoint(clientX, clientY);
+
+                        let currentHoverBtn = null;
+                        if (elem) {
+                            const btn = elem.closest('[data-gesture-btn]');
+                            if (btn) {
+                                currentHoverBtn = btn.getAttribute('data-gesture-btn');
+                            }
+                        }
+
+                        const prevHoverBtn = pipelineRef.current.hoveredBtnId;
+                        if (currentHoverBtn !== prevHoverBtn) {
+                            setHoveredBtnId(currentHoverBtn);
+                            setHoverProgress(0);
+                            if (currentHoverBtn) {
+                                stateRef.current.hoverStart = Date.now();
+                            } else {
+                                stateRef.current.hoverStart = null;
+                            }
+                        } else if (currentHoverBtn) {
+                            if (stateRef.current.hoverStart) {
+                                const elapsed = Date.now() - stateRef.current.hoverStart;
+                                const progress = Math.min((elapsed / 1200) * 100, 100);
+                                setHoverProgress(progress);
+
+                                if (progress >= 100) {
+                                    stateRef.current.hoverStart = null;
+                                    if (confirmSelectionRef.current) {
+                                        confirmSelectionRef.current(currentHoverBtn);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (didAirTap && currentHoverBtn) {
+                            stateRef.current.hoverStart = null;
+                            if (confirmSelectionRef.current) {
+                                confirmSelectionRef.current(currentHoverBtn);
+                            }
+                        }
+
+                        if (currentHoverBtn) {
+                            // Freeze panning and zooming when hovering any button
+                            stateRef.current.prevIndex = null;
+                            stateRef.current.prevDistance = null;
+                        } else if (currentStep === null) {
                             // --- NAVIGATION MODE ---
                             // 2. PAN LOGIC (Hand Index Finger)
                             const ALPHA = 0.05; // Smooth index finger coordinate change
@@ -287,7 +485,7 @@ const MapComponent = forwardRef(({
                             }
                             stateRef.current.prevDistance = sDist;
 
-                            // If we pinch (Air Tap) when in navigation mode, lock the position and open selection menu
+                            // If we pinch (Air Tap) when in navigation mode and NOT hovering a button, lock the position and open selection menu
                             if (didAirTap) {
                                 const lngLat = map.unproject([smoothedPos.x, smoothedPos.y]);
                                 playSound('click');
@@ -300,56 +498,11 @@ const MapComponent = forwardRef(({
                                 stateRef.current.prevIndex = null;
                                 stateRef.current.prevDistance = null;
                             }
-                        } 
-                        else if (currentStep === 'selecting') {
+                        } else if (currentStep === 'selecting') {
                             // --- SELECTING/MENU MODE ---
                             // Map panning and zooming are frozen, index and distance states reset
                             stateRef.current.prevIndex = null;
                             stateRef.current.prevDistance = null;
-
-                            // Determine hovered element
-                            const clientX = rect.left + smoothedPos.x;
-                            const clientY = rect.top + smoothedPos.y;
-                            const elem = document.elementFromPoint(clientX, clientY);
-
-                            let currentHoverBtn = null;
-                            if (elem) {
-                                const btn = elem.closest('[data-gesture-btn]');
-                                if (btn) {
-                                    currentHoverBtn = btn.getAttribute('data-gesture-btn');
-                                }
-                            }
-
-                            const prevHoverBtn = pipelineRef.current.hoveredBtnId;
-                            if (currentHoverBtn !== prevHoverBtn) {
-                                setHoveredBtnId(currentHoverBtn);
-                                setHoverProgress(0);
-                                if (currentHoverBtn) {
-                                    stateRef.current.hoverStart = Date.now();
-                                } else {
-                                    stateRef.current.hoverStart = null;
-                                }
-                            } else if (currentHoverBtn) {
-                                if (stateRef.current.hoverStart) {
-                                    const elapsed = Date.now() - stateRef.current.hoverStart;
-                                    const progress = Math.min((elapsed / 1200) * 100, 100);
-                                    setHoverProgress(progress);
-
-                                    if (progress >= 100) {
-                                        stateRef.current.hoverStart = null;
-                                        if (confirmSelectionRef.current) {
-                                            confirmSelectionRef.current(currentHoverBtn);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (didAirTap && currentHoverBtn) {
-                                stateRef.current.hoverStart = null;
-                                if (confirmSelectionRef.current) {
-                                    confirmSelectionRef.current(currentHoverBtn);
-                                }
-                            }
                         }
                     } else {
                         if (stateRef.current.handDetected) {
@@ -459,6 +612,17 @@ const MapComponent = forwardRef(({
             return null;
         }
     }, [lockedLngLat, viewportChanged]);
+
+    const currentHoveredIncidentPos = useMemo(() => {
+        if (!hoveredIncident || !mapRef.current) return null;
+        try {
+            const map = mapRef.current.getMap();
+            if (!map) return null;
+            return map.project(hoveredIncident.position);
+        } catch (e) {
+            return null;
+        }
+    }, [hoveredIncident, viewportChanged]);
 
     // --- Dynamic Geometric GeoJSON Compilers ---
     const graphGeoJSON = useMemo(() => {
@@ -584,8 +748,18 @@ const MapComponent = forwardRef(({
                 onContextMenu={handleContextMenu}
                 onClick={handleClick}
                 onMove={() => setViewportChanged(prev => prev + 1)}
+                onMouseMove={(evt) => {
+                    checkHoverAtPoint(evt.point, evt.originalEvent?.clientX, evt.originalEvent?.clientY);
+                }}
+                onMouseLeave={() => {
+                    if (closeTimeoutRef.current) {
+                        clearTimeout(closeTimeoutRef.current);
+                        closeTimeoutRef.current = null;
+                    }
+                    setHoveredIncident(null);
+                }}
                 cursor={mode === 'live' ? "pointer" : "crosshair"}
-                interactiveLayerIds={mode === 'view' || mode === 'live' ? ['gaussian-plume-layer'] : undefined}
+                interactiveLayerIds={['gaussian-plume-layer']}
             >
                 <NavigationControl position="top-right" />
                 <FullscreenControl position="top-right" />
@@ -617,6 +791,112 @@ const MapComponent = forwardRef(({
                     </Source>
                 )}
             </Map>
+
+            {/* Premium Glassmorphic Hazard Tooltip */}
+            {hoveredIncident && currentHoveredIncidentPos && (
+                <div
+                    data-hazard-tooltip
+                    className="absolute z-[95] backdrop-blur-md bg-slate-950/90 border border-slate-800 rounded-2xl p-4 shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex flex-col gap-2 w-64 select-none text-left"
+                    style={{
+                        left: `${currentHoveredIncidentPos.x}px`,
+                        top: `${currentHoveredIncidentPos.y}px`,
+                        transform: 'translate(-50%, -120%)'
+                    }}
+                >
+                    <div className="flex justify-between items-center border-b border-slate-800/80 pb-2 mb-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Hazard Details
+                        </span>
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                            hoveredIncident.details?.status === 'Resolved'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                        }`}>
+                            {hoveredIncident.details?.status === 'Resolved' ? 'Resolved' : 'In-progress'}
+                        </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 text-xs text-slate-300">
+                        <div>
+                            <span className="text-slate-500 text-[10px] uppercase tracking-wider block">Chemical Type</span>
+                            <span className="font-bold text-slate-100">
+                                {hoveredIncident.details?.type?.replace(/_/g, ' ') || 'Unknown'}
+                            </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <span className="text-slate-500 text-[10px] uppercase tracking-wider block">Spillage Vol</span>
+                                <span className="font-semibold text-slate-200">
+                                    {hoveredIncident.details?.amount || 100} kg
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-slate-500 text-[10px] uppercase tracking-wider block">Report Time</span>
+                                <span className="font-semibold text-slate-200">
+                                    {(() => {
+                                        const reportTime = hoveredIncident.details?.timestamp || hoveredIncident.startTime;
+                                        return reportTime 
+                                            ? new Date(reportTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                            : 'N/A';
+                                    })()}
+                                </span>
+                            </div>
+                        </div>
+
+                        {hoveredIncident.details?.status === 'Resolved' ? (
+                            <div className="grid grid-cols-2 gap-2 border-t border-slate-800/50 pt-1.5 mt-0.5">
+                                <div>
+                                    <span className="text-emerald-500 text-[10px] uppercase tracking-wider block font-medium">Resolved At</span>
+                                    <span className="font-semibold text-emerald-300">
+                                        {(() => {
+                                            const resTime = hoveredIncident.details?.resolvedAt || hoveredIncident.resolvedAt;
+                                            return resTime 
+                                                ? new Date(resTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                                                : 'N/A';
+                                        })()}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-slate-500 text-[10px] uppercase tracking-wider block">Total Duration</span>
+                                    <span className="font-semibold text-slate-200">
+                                        {formatDuration(hoveredIncident)}
+                                    </span>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="border-t border-slate-800/50 pt-1.5 mt-0.5">
+                                <span className="text-slate-500 text-[10px] uppercase tracking-wider block">Active Duration</span>
+                                <span className="font-semibold text-slate-200">
+                                    {formatDuration(hoveredIncident)}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+
+                    {hoveredIncident.details?.status !== 'Resolved' && (
+                        <div className="mt-2 pt-2 border-t border-slate-800/80">
+                            <button
+                                data-gesture-btn={"resolve-" + hoveredIncident.id}
+                                onClick={() => handleConfirmSelection("resolve-" + hoveredIncident.id)}
+                                className={`relative overflow-hidden w-full px-3 py-2 rounded-xl text-center text-xs font-bold tracking-wide transition-all duration-200 border cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    hoveredBtnId === ("resolve-" + hoveredIncident.id)
+                                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 scale-[1.02] shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                                        : 'bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-500 shadow-md hover:shadow-emerald-500/20'
+                                }`}
+                            >
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>Resolve Hazard</span>
+                                {hoveredBtnId === ("resolve-" + hoveredIncident.id) && (
+                                    <div 
+                                        className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-75"
+                                        style={{ width: `${hoverProgress}%` }}
+                                    />
+                                )}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Custom Sci-Fi Hologram Cursor/Reticle Overlays */}
             {gesturesEnabled && stateRef.current.handDetected && (

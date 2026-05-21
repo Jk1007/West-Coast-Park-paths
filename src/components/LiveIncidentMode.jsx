@@ -111,6 +111,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                         radius: config.radius,
                         color: config.color,
                         elapsedSimSec: 300, // Visually triggers native fully-grown Plume state
+                        resolvedAt: record.resolved_at || record.resolvedAt || null,
                         details: {
                             id: record.id,
                             title: record.title,
@@ -120,6 +121,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                             desc: record.description,
                             others: record.others,
                             timestamp: record.created_at || new Date().toISOString(),
+                            resolvedAt: record.resolved_at || record.resolvedAt || null,
                             amount: record.amount || (record.severity === 'Critical' ? 500 : (record.severity === 'High' ? 300 : (record.severity === 'Medium' ? 100 : 50)))
                         }
                     };
@@ -150,6 +152,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                             radius: config.radius,
                             color: config.color,
                             elapsedSimSec: 300,
+                            resolvedAt: newRecord.resolved_at || newRecord.resolvedAt || null,
                             details: {
                                 id: newRecord.id,
                                 title: newRecord.title,
@@ -159,6 +162,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                                 desc: newRecord.description,
                                 others: newRecord.others,
                                 timestamp: newRecord.created_at,
+                                resolvedAt: newRecord.resolved_at || newRecord.resolvedAt || null,
                                 amount: newRecord.amount || (newRecord.severity === 'Critical' ? 500 : (newRecord.severity === 'High' ? 300 : (newRecord.severity === 'Medium' ? 100 : 50)))
                             }
                         };
@@ -370,7 +374,16 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
     const mapIncidents = Array.from(new Map(activeInstances.map(inc => {
         let ageSec = inc.elapsedSimSec || 300; // Default to fully grown (300s)
         
-        if (inc.details?.timestamp && !inc.elapsedSimSec) {
+        if (inc.details?.status === 'Resolved') {
+            // Lock size by computing static age at resolution time
+            const ts = new Date(inc.details.timestamp || inc.startTime).getTime();
+            const resTs = new Date(inc.details.resolvedAt || inc.resolvedAt).getTime();
+            if (!isNaN(ts) && !isNaN(resTs)) {
+                ageSec = Math.max(300, (resTs - ts) / 1000);
+            } else {
+                ageSec = inc.elapsedSimSec || 300;
+            }
+        } else if (inc.details?.timestamp && !inc.elapsedSimSec) {
             const ts = new Date(inc.details.timestamp).getTime();
             if (!isNaN(ts)) {
                 const calculatedAge = (currentTime - ts) / 1000;
@@ -427,6 +440,66 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
         }
     }, []);
 
+    const handleResolveIncident = useCallback(async (incidentId) => {
+        try {
+            const resolvedTimestamp = new Date().toISOString();
+            
+            // Try updating both status and resolved_at first in case resolved_at column exists
+            let { error } = await supabase
+                .from('incidents')
+                .update({ 
+                    status: 'Resolved', 
+                    resolved_at: resolvedTimestamp 
+                })
+                .eq('id', incidentId);
+
+            // Fallback to updating only status if database schema returns an error
+            if (error) {
+                console.warn("Could not update resolved_at, falling back to status only:", error);
+                const fallbackResult = await supabase
+                    .from('incidents')
+                    .update({ status: 'Resolved' })
+                    .eq('id', incidentId);
+                if (fallbackResult.error) throw fallbackResult.error;
+            }
+            
+            console.log("Incident successfully resolved in Supabase.");
+            
+            setSelectedIncident(prev => {
+                if (prev && prev.id === incidentId) {
+                    return {
+                        ...prev,
+                        resolvedAt: resolvedTimestamp,
+                        details: { 
+                            ...prev.details, 
+                            status: 'Resolved',
+                            resolvedAt: resolvedTimestamp
+                        }
+                    };
+                }
+                return prev;
+            });
+
+            setIncidents(prevIncidents => prevIncidents.map(inc => {
+                if (inc.id === incidentId) {
+                    return {
+                        ...inc,
+                        resolvedAt: resolvedTimestamp,
+                        details: {
+                            ...inc.details,
+                            status: 'Resolved',
+                            resolvedAt: resolvedTimestamp
+                        }
+                    };
+                }
+                return inc;
+            }));
+        } catch (error) {
+            console.error("Error resolving incident in Supabase: ", error);
+            alert(`Resolution Error: ${error.message}`);
+        }
+    }, []);
+
     return (
         <div className="w-full h-full relative overflow-hidden bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
 
@@ -438,6 +511,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                 selectedLocation={selectedLocation}
                 onLocationSelect={handleMapClick}
                 onAddIncidentDirect={handleAddIncidentDirect}
+                onResolveIncident={handleResolveIncident}
                 onIncidentClick={handleIncidentClick}
                 onWindChange={handleWindChange}
                 incidents={mapIncidents}

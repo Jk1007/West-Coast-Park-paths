@@ -16,25 +16,30 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
             const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
             const Q = baseQ * Math.pow(massRatio, 1.25); // Exaggerates visual thickness for smaller spills
             
-            // Core physical decay color interpolator (Yellow -> Orange -> Red) mapped to 5 environmental minutes (300s)
-            // This aligns visual 'fully grown' with mechanical plume bounding expansion.
-            const lifeRatio = Math.min(1, Math.max(0, (inc.elapsedSimSec || 0) / 300));
-            
-            let r, g, b;
-            if (lifeRatio < 0.5) {
-                // Dark Amber (#b45309) -> Dark Orange (#c2410c)
-                const t = lifeRatio * 2; // scale 0-0.5 to 0-1
-                r = Math.round(180 + (194 - 180) * t); // 180 -> 194
-                g = Math.round(83 + (65 - 83) * t);    // 83 -> 65
-                b = Math.round(9 + (12 - 9) * t);      // 9 -> 12
+            let dynamicColor;
+            if (inc.details?.status === 'Resolved') {
+                dynamicColor = '#10b981';
             } else {
-                // Dark Orange (#c2410c) -> Dark Red (#b91c1c)
-                const t = (lifeRatio - 0.5) * 2; // scale 0.5-1 to 0-1
-                r = Math.round(194 + (185 - 194) * t); // 194 -> 185
-                g = Math.round(65 + (28 - 65) * t);    // 65 -> 28
-                b = Math.round(12 + (28 - 12) * t);    // 12 -> 28
+                // Core physical decay color interpolator (Yellow -> Orange -> Red) mapped to 5 environmental minutes (300s)
+                // This aligns visual 'fully grown' with mechanical plume bounding expansion.
+                const lifeRatio = Math.min(1, Math.max(0, (inc.elapsedSimSec || 0) / 300));
+                
+                let r, g, b;
+                if (lifeRatio < 0.5) {
+                    // Dark Amber (#b45309) -> Dark Orange (#c2410c)
+                    const t = lifeRatio * 2; // scale 0-0.5 to 0-1
+                    r = Math.round(180 + (194 - 180) * t); // 180 -> 194
+                    g = Math.round(83 + (65 - 83) * t);    // 83 -> 65
+                    b = Math.round(9 + (12 - 9) * t);      // 9 -> 12
+                } else {
+                    // Dark Orange (#c2410c) -> Dark Red (#b91c1c)
+                    const t = (lifeRatio - 0.5) * 2; // scale 0.5-1 to 0-1
+                    r = Math.round(194 + (185 - 194) * t); // 194 -> 185
+                    g = Math.round(65 + (28 - 65) * t);    // 65 -> 28
+                    b = Math.round(12 + (28 - 12) * t);    // 12 -> 28
+                }
+                dynamicColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
             }
-            const dynamicColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
             
             // Map the Gaussian IDLH bounding shape mathematically into geographic space
             const polyCoords = PlumePhysics.generatePlumePolygon(
@@ -55,7 +60,8 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
                     },
                     properties: {
                         color: dynamicColor,
-                        id: inc.id
+                        id: inc.id,
+                        isResolved: inc.details?.status === 'Resolved'
                     }
                 });
             }
@@ -72,12 +78,17 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
         type: 'fill',
         paint: {
             'fill-color': ['get', 'color'],
-            'fill-opacity': selectedIncidentId ? [
+            'fill-opacity': [
                 'case',
-                ['==', ['get', 'id'], selectedIncidentId],
-                0.8, // Highlight specifically 
-                0.3  // Dim others
-            ] : 0.7, // Standard opacity
+                ['get', 'isResolved'],
+                0.4, // Muted opacity for resolved plumes
+                selectedIncidentId ? [
+                    'case',
+                    ['==', ['get', 'id'], selectedIncidentId],
+                    0.8, // Highlight specifically 
+                    0.3  // Dim others
+                ] : 0.7 // Standard opacity
+            ]
         }
     };
     
@@ -86,14 +97,24 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
         id: 'gaussian-plume-outline',
         type: 'line',
         paint: {
-            'line-color': '#ffffff',
+            'line-color': [
+                'case',
+                ['get', 'isResolved'],
+                '#10b981', // Muted green outline
+                '#ffffff'
+            ],
             'line-width': selectedIncidentId ? [
                 'case',
                 ['==', ['get', 'id'], selectedIncidentId],
                 3,
                 1
             ] : 3,
-            'line-opacity': 0.9
+            'line-opacity': [
+                'case',
+                ['get', 'isResolved'],
+                0.6,
+                0.9
+            ]
         }
     };
 
