@@ -4,7 +4,7 @@ import * as turf from '@turf/turf';
 import { PARK_CENTER, PARK_BOUNDS } from '../data/ParkData';
 import ParkGraph from '../data/ParkGraph.json';
 import maplibregl from 'maplibre-gl';
-import { Hand, Terminal, CheckCircle2 } from 'lucide-react';
+import { Hand, Terminal, CheckCircle2, X } from 'lucide-react';
 import { PlumeLayer } from './PlumeLayer';
 import { PlumePhysics, CHEMICAL_Q_RATES } from '../simulation/PlumePhysics';
 
@@ -79,6 +79,11 @@ const MapComponent = forwardRef(({
     useEffect(() => { pipelineRef.current.hoverProgress = hoverProgress; }, [hoverProgress]);
 
     const [hoveredIncident, setHoveredIncident] = useState(null);
+    const [lockedIncidentId, setLockedIncidentId] = useState(null);
+    const lockedIncidentIdRef = useRef(null);
+    useEffect(() => {
+        lockedIncidentIdRef.current = lockedIncidentId;
+    }, [lockedIncidentId]);
 
     const formatDuration = useCallback((inc) => {
         let seconds = 0;
@@ -194,7 +199,16 @@ const MapComponent = forwardRef(({
         // If not hovering a plume and not over the tooltip, clear hover with debounce
         if (!closeTimeoutRef.current) {
             closeTimeoutRef.current = setTimeout(() => {
-                setHoveredIncident(null);
+                if (lockedIncidentIdRef.current) {
+                    const lockedInc = incidents.find(i => i.id === lockedIncidentIdRef.current);
+                    if (lockedInc) {
+                        setHoveredIncident(lockedInc);
+                    } else {
+                        setHoveredIncident(null);
+                    }
+                } else {
+                    setHoveredIncident(null);
+                }
                 closeTimeoutRef.current = null;
             }, 600); // 600ms grace period to cross the gap or interact
         }
@@ -209,6 +223,7 @@ const MapComponent = forwardRef(({
             setHoveredBtnId(null);
             setHoverProgress(0);
             setHoveredIncident(null);
+            setLockedIncidentId(null);
         }
     }, [gesturesEnabled]);
 
@@ -264,6 +279,16 @@ const MapComponent = forwardRef(({
         }
     };
 
+    const handleCloseTooltip = useCallback(() => {
+        setLockedIncidentId(null);
+        setHoveredIncident(null);
+        if (closeTimeoutRef.current) {
+            clearTimeout(closeTimeoutRef.current);
+            closeTimeoutRef.current = null;
+        }
+        playSound('click');
+    }, []);
+
     const handleConfirmSelection = useCallback((btnId) => {
         if (btnId.startsWith('resolve-')) {
             const incidentId = btnId.replace('resolve-', '');
@@ -272,6 +297,7 @@ const MapComponent = forwardRef(({
             }
             playSound('chime');
             setHoveredIncident(null);
+            setLockedIncidentId(null);
             setHoveredBtnId(null);
             setHoverProgress(0);
             if (closeTimeoutRef.current) {
@@ -581,24 +607,31 @@ const MapComponent = forwardRef(({
 
     const handleClick = (evt) => {
         if (mode === 'view' || mode === 'live' || mode === 'simulation') {
-            if (onLocationSelect) {
-                onLocationSelect([evt.lngLat.lng, evt.lngLat.lat]);
-            }
-            
             const features = mapRef.current?.queryRenderedFeatures(evt.point, {
                 layers: ['gaussian-plume-layer']
             });
-            if (features && features.length > 0 && onIncidentClick) {
+            if (features && features.length > 0) {
                 const featureId = features[0].properties.id;
-                onIncidentClick(incidents.find(inc => inc.id === featureId));
-            } else {
-                // Lock coordinates and show options menu on empty map click
-                setLockedLngLat([evt.lngLat.lng, evt.lngLat.lat]);
-                setPipelineStep('selecting');
-                setHoveredBtnId(null);
-                setHoverProgress(0);
-                playSound('click');
+                const clickedInc = incidents.find(inc => inc.id === featureId);
+                if (clickedInc) {
+                    setLockedIncidentId(clickedInc.id);
+                    setHoveredIncident(clickedInc);
+                    if (onIncidentClick) {
+                        onIncidentClick(clickedInc);
+                    }
+                    playSound('click');
+                    return;
+                }
             }
+
+            // Clicked elsewhere on empty map space
+            setLockedIncidentId(null);
+            setHoveredIncident(null);
+
+            if (onLocationSelect) {
+                onLocationSelect([evt.lngLat.lng, evt.lngLat.lat]);
+            }
+            playSound('click');
         }
     };
 
@@ -756,7 +789,9 @@ const MapComponent = forwardRef(({
                         clearTimeout(closeTimeoutRef.current);
                         closeTimeoutRef.current = null;
                     }
-                    setHoveredIncident(null);
+                    if (!lockedIncidentIdRef.current) {
+                        setHoveredIncident(null);
+                    }
                 }}
                 cursor={mode === 'live' ? "pointer" : "crosshair"}
                 interactiveLayerIds={['gaussian-plume-layer']}
@@ -804,16 +839,25 @@ const MapComponent = forwardRef(({
                     }}
                 >
                     <div className="flex justify-between items-center border-b border-slate-800/80 pb-2 mb-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            Hazard Details
-                        </span>
-                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                            hoveredIncident.details?.status === 'Resolved'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
-                        }`}>
-                            {hoveredIncident.details?.status === 'Resolved' ? 'Resolved' : 'In-progress'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                                Hazard Details
+                            </span>
+                            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                hoveredIncident.details?.status === 'Resolved'
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                            }`}>
+                                {hoveredIncident.details?.status === 'Resolved' ? 'Resolved' : 'In-progress'}
+                            </span>
+                        </div>
+                        <button
+                            onClick={handleCloseTooltip}
+                            className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                            title="Close Panel"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
                     </div>
 
                     <div className="flex flex-col gap-1.5 text-xs text-slate-300">
