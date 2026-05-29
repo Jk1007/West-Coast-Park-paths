@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MapComponent from './MapComponent';
 import UIOverlay from './UIOverlay';
 import { SimulationController } from '../simulation/SimulationController';
-import { XCircle, CheckCircle2, ShieldAlert, X, Moon, Sun, Hand, Server } from 'lucide-react';
+import { XCircle, CheckCircle2, ShieldAlert, X, Moon, Sun, Hand, Server, Wind } from 'lucide-react';
 import supabase from '../supabase';
 import { HAZARD_DATABASE } from '../constants/HazardDatabase';
 import SimulationWsService from '../services/SimulationWsService';
@@ -391,7 +391,65 @@ const SimulationMode = ({ onExit, theme }) => {
                     onEndSim={handleEndSim}
                     theme={theme}
                 />
+
+                {/* Atmospheric Conditions Widget */}
+                <div className={`absolute bottom-12 right-6 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200 dark:border-gray-800 p-4 rounded-2xl shadow-xl z-20 pointer-events-none transition-all duration-500 ease-in-out ${pendingIncidentCoord || showSaveModal ? 'translate-y-8 opacity-0 scale-95' : 'translate-y-0 opacity-100 scale-100'}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                        <Wind className="w-4 h-4 text-blue-500" />
+                        <h3 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">Live Atmosphere</h3>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-left">
+                        <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Wind Speed</p>
+                            <p className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100">
+                                {wind.speed.toFixed(1)} <span className="text-xs text-gray-400 font-sans font-medium">km/h</span>
+                            </p>
+                        </div>
+                        <div className="flex flex-col">
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">Direction</p>
+                            <div className="flex items-center gap-2 mt-1">
+                                <div className="relative w-8 h-8 rounded-full border border-gray-200 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/30 flex justify-center items-center shadow-inner pt-0.5">
+                                    <div
+                                        style={{ transform: "rotate(" + ((wind.direction + 180) % 360) + "deg)" }}
+                                        className="transition-transform duration-500 ease-out flex items-center justify-center pt-px"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500 dark:text-blue-400">
+                                            <line x1="12" y1="19" x2="12" y2="5"></line>
+                                            <polyline points="5 12 12 5 19 12"></polyline>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <span className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100">
+                                    {wind.direction.toFixed(0)}&deg;
+                                </span>
+                            </div>
+                        </div>
+                        {wind.weather && (
+                            <>
+                                <div>
+                                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Temp</p>
+                                    <p className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100">
+                                        {wind.weather.temp.toFixed(1)} <span className="text-xs text-gray-400 font-sans font-medium">°C</span>
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Humidity</p>
+                                    <p className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100">
+                                        {wind.weather.hum.toFixed(0)} <span className="text-xs text-gray-400 font-sans font-medium">%</span>
+                                    </p>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                    <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-800 flex justify-between items-center">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">Pasquill-Gifford</span>
+                        <span className="text-[10px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-500/30">
+                            Class {wind.stabilityClass}
+                        </span>
+                    </div>
+                </div>
             </div>
+
 
             {/* Save Simulation Modal */}
             <AnimatePresence>
