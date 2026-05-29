@@ -79,6 +79,10 @@ const MapComponent = forwardRef(({
     useEffect(() => { pipelineRef.current.hoverProgress = hoverProgress; }, [hoverProgress]);
 
     const [hoveredIncident, setHoveredIncident] = useState(null);
+    const hoveredIncidentRef = useRef(null);
+    useEffect(() => {
+        hoveredIncidentRef.current = hoveredIncident;
+    }, [hoveredIncident]);
     const [lockedIncidentId, setLockedIncidentId] = useState(null);
     const lockedIncidentIdRef = useRef(null);
     useEffect(() => {
@@ -290,7 +294,9 @@ const MapComponent = forwardRef(({
     }, []);
 
     const handleConfirmSelection = useCallback((btnId) => {
-        if (btnId.startsWith('resolve-')) {
+        if (btnId === 'close-tooltip') {
+            handleCloseTooltip();
+        } else if (btnId.startsWith('resolve-')) {
             const incidentId = btnId.replace('resolve-', '');
             if (onResolveIncident) {
                 onResolveIncident(incidentId);
@@ -511,15 +517,22 @@ const MapComponent = forwardRef(({
                             }
                             stateRef.current.prevDistance = sDist;
 
-                            // If we pinch (Air Tap) when in navigation mode and NOT hovering a button, lock the position and open selection menu
+                            // If we pinch (Air Tap) when in navigation mode and NOT hovering a button, check if we are hovering a plume
                             if (didAirTap) {
-                                const lngLat = map.unproject([smoothedPos.x, smoothedPos.y]);
-                                playSound('click');
-                                setLockedPos(smoothedPos);
-                                setLockedLngLat([lngLat.lng, lngLat.lat]);
-                                setPipelineStep('selecting');
-                                setHoveredBtnId(null);
-                                setHoverProgress(0);
+                                if (hoveredIncidentRef.current) {
+                                    // Lock the persistent tooltip for this incident
+                                    setLockedIncidentId(hoveredIncidentRef.current.id);
+                                    playSound('click');
+                                } else {
+                                    // Lock the position and open selection menu (small panel)
+                                    const lngLat = map.unproject([smoothedPos.x, smoothedPos.y]);
+                                    playSound('click');
+                                    setLockedPos(smoothedPos);
+                                    setLockedLngLat([lngLat.lng, lngLat.lat]);
+                                    setPipelineStep('selecting');
+                                    setHoveredBtnId(null);
+                                    setHoverProgress(0);
+                                }
                                 // Reset WS references
                                 stateRef.current.prevIndex = null;
                                 stateRef.current.prevDistance = null;
@@ -852,11 +865,22 @@ const MapComponent = forwardRef(({
                             </span>
                         </div>
                         <button
+                            data-gesture-btn="close-tooltip"
                             onClick={handleCloseTooltip}
-                            className="p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                            className={`p-1 rounded-full transition-colors cursor-pointer flex items-center justify-center relative overflow-hidden ${
+                                hoveredBtnId === 'close-tooltip'
+                                    ? 'bg-slate-800 text-white scale-110 shadow-md'
+                                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                            }`}
                             title="Close Panel"
                         >
                             <X className="w-3.5 h-3.5" />
+                            {hoveredBtnId === 'close-tooltip' && (
+                                <div 
+                                    className="absolute bottom-0 left-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-75"
+                                    style={{ width: `${hoverProgress}%` }}
+                                />
+                            )}
                         </button>
                     </div>
 
