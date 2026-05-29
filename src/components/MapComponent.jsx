@@ -432,8 +432,8 @@ const MapComponent = forwardRef(({
                         checkHoverAtPoint(smoothedPos, rect.left + smoothedPos.x, rect.top + smoothedPos.y);
 
                         // Universally check if cursor is over a gesture button
-                        const clientX = rect.left + smoothedPos.x;
-                        const clientY = rect.top + smoothedPos.y;
+                        const clientX = Math.round(rect.left + smoothedPos.x);
+                        const clientY = Math.round(rect.top + smoothedPos.y);
                         const elem = document.elementFromPoint(clientX, clientY);
 
                         let currentHoverBtn = null;
@@ -518,7 +518,7 @@ const MapComponent = forwardRef(({
                             stateRef.current.prevDistance = sDist;
 
                             // If we pinch (Air Tap) when in navigation mode and NOT hovering a button, check if we are hovering a plume
-                            if (didAirTap) {
+                            if (didAirTap && !currentHoverBtn) {
                                 if (hoveredIncidentRef.current) {
                                     // Lock the persistent tooltip for this incident
                                     setLockedIncidentId(hoveredIncidentRef.current.id);
@@ -977,9 +977,9 @@ const MapComponent = forwardRef(({
                     }}
                 >
                     {/* Outer glowing pulsing ring */}
-                    <div className="absolute inset-0 rounded-full border-2 border-cyan-400/80 bg-cyan-500/10 animate-pulse" />
+                    <div className="absolute inset-0 rounded-full border-2 border-cyan-400/80 bg-cyan-500/10 animate-pulse pointer-events-none" />
                     {/* Inner glowing core */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-cyan-400 rounded-full shadow-[0_0_10px_#22d3ee]" />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-cyan-400 rounded-full shadow-[0_0_10px_#22d3ee] pointer-events-none" />
                 </div>
             )}
 
