@@ -609,7 +609,7 @@ export class SimulationController {
             // Wind Drift Vector (Plume moves in direction of wind)
                 // Speed is m/s. 1 knot = 0.514 m/s. Let's use wind.speed as km/h for the UI, which is 0.27 m/s.
                 // Or if it's knots from API, 1 knot = 0.5144. Let's assume it's roughly m/s for drift simplicity.
-                const windSpeedMs = this.wind.speed * 0.5144; // convert km/h to m/s
+                const windSpeedMs = this.wind.speed * 0.277778; // convert km/h to m/s
                 const angleRad = (this.wind.direction + 180) * (Math.PI / 180);
 
                 // Scale drift factor down slightly so it's realistic for a gas plume over 1 minute

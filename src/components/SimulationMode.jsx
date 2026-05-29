@@ -7,6 +7,7 @@ import { XCircle, CheckCircle2, ShieldAlert, X, Moon, Sun, Hand, Server } from '
 import supabase from '../supabase';
 import { HAZARD_DATABASE } from '../constants/HazardDatabase';
 import SimulationWsService from '../services/SimulationWsService';
+import { fetchWindData } from '../services/WindService';
 
 const SimulationMode = ({ onExit, theme }) => {
     const simulationRef = useRef(null);
@@ -16,7 +17,7 @@ const SimulationMode = ({ onExit, theme }) => {
     // Simulation State (Synced for Rendering)
     const [agents, setAgents] = useState([]);
     const [incidents, setIncidents] = useState([]);
-    const [wind, setWind] = useState({ speed: 0, direction: 0 });
+    const [wind, setWind] = useState({ speed: 10, direction: 45, stabilityClass: 'D', weather: { temp: 28, rain: 0, hum: 80 } });
     const [stats, setStats] = useState({ activeIncidents: 0, safetyIndex: 100 });
     const [status, setStatus] = useState('Clear');
     const [safeNodes, setSafeNodes] = useState([]); // Debugging Safe Zones
@@ -46,6 +47,23 @@ const SimulationMode = ({ onExit, theme }) => {
         SimulationWsService.connect(setWsBackendStatus);
         return () => SimulationWsService.disconnect(setWsBackendStatus);
     }, []);
+
+    // Mount Live Atmosphere polling
+    useEffect(() => {
+        const loadWind = async () => {
+            const windData = await fetchWindData();
+            if (windData) {
+                setWind(windData);
+                if (simulationRef.current) {
+                    simulationRef.current.wind = windData;
+                }
+            }
+        };
+        loadWind();
+        const windTick = setInterval(loadWind, 30000); // 30s updates
+        return () => clearInterval(windTick);
+    }, []);
+
 
     useEffect(() => {
         // Initialize Simulation only once
@@ -168,8 +186,9 @@ const SimulationMode = ({ onExit, theme }) => {
     }, [pendingIncidentCoord, incidentForm]);
 
     const handleWindChange = React.useCallback((newWind) => {
+        setWind(prev => ({ ...prev, ...newWind }));
         if (simulationRef.current) {
-            simulationRef.current.wind = newWind;
+            simulationRef.current.wind = { ...simulationRef.current.wind, ...newWind };
         }
     }, []);
 
