@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShieldAlert, Send, AlertTriangle, CheckCircle2, X, MapPin, Activity, Droplets, Wind, Zap, Eye, EyeOff, List, Search, Filter, Pencil, Trash2, Server } from 'lucide-react';
+import { ShieldAlert, Send, AlertTriangle, CheckCircle2, X, MapPin, Activity, Droplets, Wind, Zap, Eye, EyeOff, List, Search, Filter, Pencil, Trash2, Server, Moon, Sun, Hand } from 'lucide-react';
 import MapComponent from './MapComponent';
+import UIOverlay from './UIOverlay';
 import supabase from '../supabase';
 import { fetchWindData } from '../services/WindService';
 import { HAZARD_DATABASE } from '../constants/HazardDatabase';
 import SimulationWsService from '../services/SimulationWsService';
+import { SimulationController } from '../simulation/SimulationController';
 
 // Helper to determine plume radius and color based on severity
 const getSeverityConfig = (severity) => {
@@ -29,7 +31,7 @@ const getTypeIcon = (type) => {
     return <AlertTriangle className="w-5 h-5 text-red-400" />;
 };
 
-export const parseCoordinates = (input) => {
+const parseCoordinates = (input) => {
     if (!input) return [0, 0];
     if (Array.isArray(input)) return input.map(Number);
     if (typeof input === 'string') {
@@ -61,6 +63,9 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
 
+    const [isHandDetected, setIsHandDetected] = useState(false);
+    const [isNightMode, setIsNightMode] = useState(false);
+
     // Plume Spread State
     const [activePlume, setActivePlume] = useState(null);
 
@@ -80,6 +85,12 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
     const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'Ongoing', 'Resolved'
     const [typeFilter, setTypeFilter] = useState('All');
     const [wsBackendStatus, setWsBackendStatus] = useState('disconnected');
+
+    // AI Agents State (from SimulationController)
+    const simulationRef = useRef(null);
+    const requestRef = useRef();
+    const [agents, setAgents] = useState([]);
+    const [safeNodes, setSafeNodes] = useState([]);
 
     // Connect to Python plume backend via WebSocket
     useEffect(() => {
@@ -198,6 +209,67 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
             clearInterval(windTick);
         };
     }, []);
+
+    // Setup Physics Loop for AI Agents
+    useEffect(() => {
+        if (!simulationRef.current) {
+            simulationRef.current = new SimulationController();
+        }
+
+        let lastTime = performance.now();
+        let accumulator = 0;
+        const fpsInterval = 1000 / 30;
+
+        const animate = (time) => {
+            const dtMs = time - lastTime;
+            lastTime = time;
+            accumulator += dtMs;
+            
+            if (accumulator >= fpsInterval) {
+                const syncDt = Math.min(accumulator / 1000, 0.1);
+                
+                if (simulationRef.current) {
+                    simulationRef.current.update(syncDt);
+                    setAgents([...simulationRef.current.agents]);
+                    setSafeNodes([...simulationRef.current.safeNodes]);
+                }
+                
+                accumulator = accumulator % fpsInterval;
+            }
+            requestRef.current = requestAnimationFrame(animate);
+        };
+
+        requestRef.current = requestAnimationFrame(animate);
+
+        return () => {
+            if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        };
+    }, []);
+
+    // Sync Live DB Incidents -> Physics Engine (so agents flee)
+    useEffect(() => {
+        if (simulationRef.current) {
+            // Give the physics engine copies of the live incidents
+            simulationRef.current.incidents = incidents.map(inc => ({
+                ...inc,
+                position: [...inc.position], // deep copy coords
+                details: { ...inc.details }
+            }));
+            
+            const hasActive = incidents.some(inc => inc.details?.status !== 'Resolved');
+            simulationRef.current.status = hasActive ? 'Evacuating' : 'Clear';
+            
+            simulationRef.current.identifyDynamicSafeNodes();
+            simulationRef.current.recalculatePaths();
+        }
+    }, [incidents]);
+
+    // Sync Wind to Physics
+    useEffect(() => {
+        if (simulationRef.current) {
+            simulationRef.current.wind = wind;
+        }
+    }, [wind]);
 
     // Track dirty state to warn user on navigation
     useEffect(() => {
@@ -366,6 +438,14 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
         return matchesSearch && matchesStatus && matchesType;
     });
 
+    // Derived stats for UIOverlay
+    const activeIncidentsCount = filteredIncidents.filter(inc => inc.details?.status !== 'Resolved').length;
+    const stats = {
+        activeIncidents: activeIncidentsCount,
+        safetyIndex: Math.max(0, 100 - (activeIncidentsCount * 15))
+    };
+    const uiStatus = activeIncidentsCount > 0 ? 'Evacuating' : 'Clear';
+
     const activeInstances = [
         ...(showIncidents ? filteredIncidents : []), 
         ...(activePlume ? [activePlume] : []),
@@ -404,6 +484,10 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
     const handleWindChange = useCallback((newWind) => {
         setWind(prev => ({ ...prev, ...newWind }));
     }, []);
+
+    const viewportPaddingMemo = useMemo(() => {
+        return selectedIncident || selectedLocation ? { right: 400 } : {};
+    }, [selectedIncident, selectedLocation]);
 
     const handleAddIncidentDirect = useCallback(async (coordinate, type) => {
         try {
@@ -503,6 +587,24 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
     return (
         <div className="w-full h-full relative overflow-hidden bg-gray-50 dark:bg-gray-950 transition-colors duration-300">
 
+            {/* Live Thematic Wrapper */}
+            <div className="absolute inset-0 border-4 border-red-500/30 rounded-lg pointer-events-none z-[60]" />
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500 text-white px-6 py-1 rounded-b-lg font-bold text-xs uppercase tracking-widest pointer-events-none z-[60] shadow-xl">
+                Live Environment
+            </div>
+
+            <button
+                onClick={() => setIsNightMode(!isNightMode)}
+                className={`absolute top-20 right-6 z-[60] p-2 rounded-full backdrop-blur border transition-colors shadow-lg flex items-center justify-center ${
+                    isNightMode 
+                    ? 'bg-amber-500/90 text-amber-950 border-amber-600' 
+                    : 'bg-white/80 dark:bg-gray-900/80 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+                title={isNightMode ? "Night Mode Active (Extended PAD)" : "Enable Night Mode (ERG Padding)"}
+            >
+                {isNightMode ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+            </button>
+
             {/* Base Map Layer */}
             <MapComponent
                 mode="live"
@@ -515,9 +617,30 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                 onIncidentClick={handleIncidentClick}
                 onWindChange={handleWindChange}
                 incidents={mapIncidents}
-                viewportPadding={selectedIncident || selectedLocation ? { right: 400 } : {}}
+                agents={agents}
+                safeNodes={safeNodes}
+                viewportPadding={viewportPaddingMemo}
                 selectedIncidentId={selectedIncident?.details?.id || null}
-                isNightMode={false} // Could be derived from currentTime if needed
+                isNightMode={isNightMode}
+                onHandStatusChange={setIsHandDetected}
+            />
+
+            {isHandDetected && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-blue-500/90 backdrop-blur text-white px-4 py-1.5 rounded-full text-sm font-bold shadow-lg animate-pulse z-50 flex items-center gap-2 border border-blue-400">
+                    <Hand className="w-4 h-4" /> Headless Hand Tracking Active
+                </div>
+            )}
+
+            {/* UI Overlay */}
+            <UIOverlay
+                stats={stats}
+                wind={wind}
+                status={uiStatus}
+                isRecording={false}
+                onStartRecording={() => alert("Recording is only available in Sandbox mode.")}
+                onReset={() => alert("Reset is only available in Sandbox mode.")}
+                onEndSim={() => {}}
+                theme={theme}
             />
 
             {/* Atmospheric Conditions Widget */}
@@ -578,7 +701,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
             </div>
 
             {/* Python Backend WebSocket Status Badge */}
-            <div className={`absolute top-6 right-6 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-lg backdrop-blur transition-colors pointer-events-none ${
+            <div className={`absolute top-4 right-20 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border shadow-lg backdrop-blur transition-colors pointer-events-none ${
                 wsBackendStatus === 'connected'
                     ? 'bg-green-500/20 text-green-400 border-green-500/40'
                     : wsBackendStatus === 'connecting'
@@ -602,7 +725,7 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -20 }}
-                        className="absolute top-6 left-6 z-30 pointer-events-auto"
+                        className="absolute bottom-10 left-6 z-30 pointer-events-auto"
                     >
                         <button
                             onClick={() => setIsSidebarOpen(true)}
@@ -636,11 +759,13 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
             <AnimatePresence>
                 {isSidebarOpen && (
                     <motion.div
+                        drag
+                        dragMomentum={false}
                         initial={{ x: '-100%', opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: '-100%', opacity: 0 }}
                         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="absolute top-4 left-4 bottom-4 w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-40 overflow-hidden transition-colors duration-300"
+                        className="absolute top-24 left-4 w-80 max-h-[75vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-[70] overflow-hidden transition-colors duration-300 cursor-move"
                     >
                         {/* Sidebar Header & Filters */}
                         <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex flex-col gap-3 transition-colors duration-300">
@@ -676,8 +801,9 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                                     type="text"
                                     placeholder="Search incidents..."
                                     value={searchQuery}
+                                    onPointerDown={(e) => e.stopPropagation()} // Prevent dragging when interacting with input
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors placeholder-gray-400"
+                                    className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-colors placeholder-gray-400 cursor-text"
                                 />
                             </div>
 
@@ -687,8 +813,9 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                                     <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
                                     <select
                                         value={statusFilter}
+                                        onPointerDown={(e) => e.stopPropagation()}
                                         onChange={(e) => setStatusFilter(e.target.value)}
-                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-7 pr-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-purple-500 transition-colors appearance-none"
+                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-7 pr-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-purple-500 transition-colors appearance-none cursor-pointer"
                                     >
                                         <option value="All">All Status</option>
                                         <option value="Ongoing">Ongoing</option>
@@ -698,8 +825,9 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                                 <div className="flex-1">
                                     <select
                                         value={typeFilter}
+                                        onPointerDown={(e) => e.stopPropagation()}
                                         onChange={(e) => setTypeFilter(e.target.value)}
-                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-purple-500 transition-colors appearance-none"
+                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-purple-500 transition-colors appearance-none cursor-pointer"
                                     >
                                         <option value="All">All Types</option>
                                         <option value="Chemical Spill">Chemical</option>
@@ -713,7 +841,10 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
                         </div>
 
                         {/* Incident List Body */}
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                        <div 
+                            className="flex-1 overflow-y-auto p-2 space-y-2 cursor-auto"
+                            onPointerDown={(e) => e.stopPropagation()} // Let user scroll without dragging the panel
+                        >
                             {filteredIncidents.length === 0 ? (
                                 <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
                                     No incidents found matching filters.
@@ -952,11 +1083,13 @@ const LiveIncidentMode = ({ onFormStateChange, theme }) => {
             <AnimatePresence>
                 {selectedIncident && (
                     <motion.div
+                        drag
+                        dragMomentum={false}
                         initial={{ x: '100%', opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: '100%', opacity: 0 }}
                         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="absolute top-4 right-4 bottom-4 w-96 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden transition-colors duration-300"
+                        className="absolute top-4 right-4 h-[85vh] w-96 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden transition-colors duration-300 cursor-move"
                     >
                         {/* Header */}
                         <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between bg-gray-50 dark:bg-gray-900/50 transition-colors duration-300">

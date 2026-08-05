@@ -7,6 +7,7 @@ import maplibregl from 'maplibre-gl';
 import { Hand, Terminal, CheckCircle2, X } from 'lucide-react';
 import { PlumeLayer } from './PlumeLayer';
 import { PlumePhysics, CHEMICAL_Q_RATES } from '../simulation/PlumePhysics';
+import SheltersData from '../data/Shelters.json';
 
 const MapComponent = forwardRef(({
     agents = [],
@@ -89,6 +90,12 @@ const MapComponent = forwardRef(({
         lockedIncidentIdRef.current = lockedIncidentId;
     }, [lockedIncidentId]);
 
+    const [hoveredShelter, setHoveredShelter] = useState(null);
+    const hoveredShelterRef = useRef(null);
+    useEffect(() => {
+        hoveredShelterRef.current = hoveredShelter;
+    }, [hoveredShelter]);
+
     const formatDuration = useCallback((inc) => {
         let seconds = 0;
         const startTs = new Date(inc.details?.timestamp || inc.startTime).getTime();
@@ -120,7 +127,7 @@ const MapComponent = forwardRef(({
         // Check if cursor is over the tooltip first to ensure hover stability
         if (clientX !== undefined && clientY !== undefined) {
             const elem = document.elementFromPoint(clientX, clientY);
-            if (elem && elem.closest('[data-hazard-tooltip]')) {
+            if (elem && (elem.closest('[data-hazard-tooltip]') || elem.closest('[data-shelter-tooltip]'))) {
                 if (closeTimeoutRef.current) {
                     clearTimeout(closeTimeoutRef.current);
                     closeTimeoutRef.current = null;
@@ -167,7 +174,12 @@ const MapComponent = forwardRef(({
                     clearTimeout(closeTimeoutRef.current);
                     closeTimeoutRef.current = null;
                 }
-                setHoveredIncident(foundInc);
+                setHoveredIncident(prev => {
+                    if (prev && prev.id === foundInc.id && prev.details?.id === foundInc.details?.id) {
+                        return prev;
+                    }
+                    return foundInc;
+                });
                 return;
             }
         } catch (e) {
@@ -179,6 +191,25 @@ const MapComponent = forwardRef(({
             const queryPoint = Array.isArray(point) 
                 ? point 
                 : (point && typeof point.x === 'number' && typeof point.y === 'number' ? [point.x, point.y] : point);
+
+            const shelterFeatures = map.queryRenderedFeatures(queryPoint, {
+                layers: ['cd-shelters-layer']
+            });
+
+            if (shelterFeatures && shelterFeatures.length > 0) {
+                if (closeTimeoutRef.current) {
+                    clearTimeout(closeTimeoutRef.current);
+                    closeTimeoutRef.current = null;
+                }
+                setHoveredShelter({
+                    properties: shelterFeatures[0].properties,
+                    position: map.project(shelterFeatures[0].geometry.coordinates)
+                });
+                setHoveredIncident(null);
+                return;
+            } else {
+                setHoveredShelter(null);
+            }
 
             const features = map.queryRenderedFeatures(queryPoint, {
                 layers: ['gaussian-plume-layer']
@@ -192,7 +223,12 @@ const MapComponent = forwardRef(({
                         clearTimeout(closeTimeoutRef.current);
                         closeTimeoutRef.current = null;
                     }
-                    setHoveredIncident(inc);
+                    setHoveredIncident(prev => {
+                        if (prev && prev.id === inc.id && prev.details?.id === inc.details?.id) {
+                            return prev;
+                        }
+                        return inc;
+                    });
                     return;
                 }
             }
@@ -205,11 +241,12 @@ const MapComponent = forwardRef(({
             closeTimeoutRef.current = setTimeout(() => {
                 if (lockedIncidentIdRef.current) {
                     const lockedInc = incidents.find(i => i.id === lockedIncidentIdRef.current);
-                    if (lockedInc) {
-                        setHoveredIncident(lockedInc);
-                    } else {
-                        setHoveredIncident(null);
-                    }
+                    setHoveredIncident(prev => {
+                        if (lockedInc && prev && prev.id === lockedInc.id && prev.details?.id === lockedInc.details?.id) {
+                            return prev;
+                        }
+                        return lockedInc || null;
+                    });
                 } else {
                     setHoveredIncident(null);
                 }
@@ -227,6 +264,7 @@ const MapComponent = forwardRef(({
             setHoveredBtnId(null);
             setHoverProgress(0);
             setHoveredIncident(null);
+            setHoveredShelter(null);
             setLockedIncidentId(null);
         }
     }, [gesturesEnabled]);
@@ -238,6 +276,11 @@ const MapComponent = forwardRef(({
             }
         };
     }, []);
+
+    const checkHoverAtPointRef = useRef(checkHoverAtPoint);
+    useEffect(() => {
+        checkHoverAtPointRef.current = checkHoverAtPoint;
+    }, [checkHoverAtPoint]);
 
     // Web Audio Synthesizer
     const playSound = (type) => {
@@ -429,7 +472,9 @@ const MapComponent = forwardRef(({
                         const currentStep = pipelineRef.current.pipelineStep;
 
                         // Universally check if cursor is over a map plume to trigger hover tooltip
-                        checkHoverAtPoint(smoothedPos, rect.left + smoothedPos.x, rect.top + smoothedPos.y);
+                        if (checkHoverAtPointRef.current) {
+                            checkHoverAtPointRef.current(smoothedPos, rect.left + smoothedPos.x, rect.top + smoothedPos.y);
+                        }
 
                         // Universally check if cursor is over a gesture button
                         const clientX = Math.round(rect.left + smoothedPos.x);
@@ -694,7 +739,7 @@ const MapComponent = forwardRef(({
         const features = agents.map(a => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [a.position[0], a.position[1]] },
-            properties: { id: a.id, state: a.state }
+            properties: { id: a.id, state: a.state, isExposed: a.isExposed }
         }));
         return { type: 'FeatureCollection', features };
     }, [agents]);
@@ -730,6 +775,25 @@ const MapComponent = forwardRef(({
         return { type: 'FeatureCollection', features };
     }, [safeNodes]);
 
+    const cdSheltersGeoJSON = useMemo(() => {
+        const shelters = SheltersData.shelters || [];
+        if (shelters.length === 0) return null;
+        
+        const features = shelters.map((s, idx) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
+            properties: { 
+                id: `cd-shelter-${idx}`, 
+                name: s.name, 
+                address: s.address,
+                postalCode: s.postalCode,
+                type: 'CD Shelter' 
+            }
+        }));
+        
+        return { type: 'FeatureCollection', features };
+    }, []);
+
     // --- Map Styles ---
     const pathsLayerStyle = {
         id: 'paths-layer',
@@ -747,15 +811,31 @@ const MapComponent = forwardRef(({
         paint: {
             'circle-radius': 5,
             'circle-color': [
-                'match',
-                ['get', 'state'],
-                'IDLE', '#16a34a',
-                'EVACUATING', '#ea580c',
-                'ESCAPED', '#2563eb',
-                '#6b7280'
+                'case',
+                ['==', ['get', 'isExposed'], true],
+                '#a855f7', // Purple
+                ['match',
+                    ['get', 'state'],
+                    'IDLE', '#16a34a',
+                    'EVACUATING', '#ea580c',
+                    'ESCAPED', '#2563eb', // Will be hidden by opacity
+                    '#6b7280'
+                ]
             ],
             'circle-stroke-width': 1.5,
-            'circle-stroke-color': '#ffffff'
+            'circle-stroke-color': '#ffffff',
+            'circle-opacity': [
+                'match',
+                ['get', 'state'],
+                'ESCAPED', 0.0, // Hide agents that have successfully evacuated to the CD shelters
+                1.0
+            ],
+            'circle-stroke-opacity': [
+                'match',
+                ['get', 'state'],
+                'ESCAPED', 0.0,
+                1.0
+            ]
         }
     };
 
@@ -767,7 +847,7 @@ const MapComponent = forwardRef(({
             'circle-color': '#06b6d4', 
             'circle-stroke-width': 2,
             'circle-stroke-color': '#ffffff',
-            'circle-opacity': 0.8
+            'circle-opacity': 0.0 // Hide the graph exit nodes to avoid confusing them with CD shelters
         }
     };
 
@@ -779,6 +859,18 @@ const MapComponent = forwardRef(({
             'circle-color': '#3b82f6',
             'circle-stroke-width': 3,
             'circle-stroke-color': '#ffffff',
+            'circle-opacity': 0.9
+        }
+    };
+
+    const cdSheltersLayerStyle = {
+        id: 'cd-shelters-layer',
+        type: 'circle',
+        paint: {
+            'circle-radius': 7,
+            'circle-color': '#fbbf24', // Yellow/Amber to signify safe zones
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#b45309',
             'circle-opacity': 0.9
         }
     };
@@ -836,6 +928,12 @@ const MapComponent = forwardRef(({
                 {safeNodesGeoJSON && (
                     <Source id="safe-nodes-source" type="geojson" data={safeNodesGeoJSON}>
                         <Layer {...safeNodesLayerStyle} />
+                    </Source>
+                )}
+
+                {cdSheltersGeoJSON && (
+                    <Source id="cd-shelters-source" type="geojson" data={cdSheltersGeoJSON}>
+                        <Layer {...cdSheltersLayerStyle} />
                     </Source>
                 )}
             </Map>
@@ -963,6 +1061,51 @@ const MapComponent = forwardRef(({
                             </button>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Premium CD Shelter Tooltip */}
+            {hoveredShelter && hoveredShelter.position && (
+                <div
+                    data-shelter-tooltip
+                    className="absolute z-[95] backdrop-blur-md bg-amber-950/90 border border-amber-800/80 rounded-2xl p-4 shadow-[0_10px_30px_rgba(251,191,36,0.2)] flex flex-col gap-2 w-64 select-none text-left"
+                    style={{
+                        left: `${hoveredShelter.position.x}px`,
+                        top: `${hoveredShelter.position.y}px`,
+                        transform: 'translate(-50%, -120%)'
+                    }}
+                >
+                    <div className="flex justify-between items-center border-b border-amber-800/80 pb-2 mb-1">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">
+                                Safe Zone
+                            </span>
+                            <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                {hoveredShelter.properties.type}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 text-xs text-amber-100/80">
+                        <div>
+                            <span className="text-amber-500/70 text-[10px] uppercase tracking-wider block">Location Name</span>
+                            <span className="font-bold text-amber-100">
+                                {hoveredShelter.properties.name || 'Unknown'}
+                            </span>
+                        </div>
+                        <div className="mt-1">
+                            <span className="text-amber-500/70 text-[10px] uppercase tracking-wider block">Address</span>
+                            <span className="font-medium text-amber-100">
+                                {hoveredShelter.properties.address || 'N/A'}
+                            </span>
+                        </div>
+                        <div className="mt-1">
+                            <span className="text-amber-500/70 text-[10px] uppercase tracking-wider block">Postal Code</span>
+                            <span className="font-medium text-amber-100">
+                                {hoveredShelter.properties.postalCode || 'N/A'}
+                            </span>
+                        </div>
+                    </div>
                 </div>
             )}
 

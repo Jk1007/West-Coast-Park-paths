@@ -1,0 +1,574 @@
+{
+  "shelters": [
+    {
+      "name": "TELOK BLANGAH COMMUNITY CLUB",
+      "lat": 1.27486265714118,
+      "lon": 103.807875425734,
+      "postal": "108943"
+    },
+    {
+      "name": "HOLLAND-BUKIT PANJANG TOWN COUNCIL (ULU PANDAN OFFICE)",
+      "lat": 1.31205215005861,
+      "lon": 103.789581047341,
+      "postal": "279621"
+    },
+    {
+      "name": "NKF DIALYSIS CENTRE",
+      "lat": 1.33525355606987,
+      "lon": 103.845209814245,
+      "postal": "319642"
+    },
+    {
+      "name": "PASIR RIS ELIAS COMMUNITY CLUB",
+      "lat": 1.37843931155902,
+      "lon": 103.942549067451,
+      "postal": "519498"
+    },
+    {
+      "name": "SSA HEADQUARTERS",
+      "lat": 1.34803139525891,
+      "lon": 103.935566566923,
+      "postal": "529014"
+    },
+    {
+      "name": "TAMPINES EAST COMMUNITY CLUB",
+      "lat": 1.35335683374898,
+      "lon": 103.954620457783,
+      "postal": "529341"
+    },
+    {
+      "name": "PUNGGOL COMMUNITY CLUB",
+      "lat": 1.37436998821947,
+      "lon": 103.891911930322,
+      "postal": "538808"
+    },
+    {
+      "name": "HONG KAH NORTH COMMUNITY CLUB",
+      "lat": 1.35903339724932,
+      "lon": 103.749486819843,
+      "postal": "659440"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.29207178095009,
+      "lon": 103.814949924871,
+      "postal": "140132"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.30746713452173,
+      "lon": 103.797185887665,
+      "postal": "271030"
+    },
+    {
+      "name": "80B LORONG 4 TOA PAYOH",
+      "lat": 1.33529401120542,
+      "lon": 103.849888208873,
+      "postal": "312080"
+    },
+    {
+      "name": "EUNOS DAMAI VILLE",
+      "lat": 1.3321924321125,
+      "lon": 103.907363528438,
+      "postal": "410651"
+    },
+    {
+      "name": "136 PASIR RIS STREET 11",
+      "lat": 1.36468913188234,
+      "lon": 103.957950593135,
+      "postal": "510136"
+    },
+    {
+      "name": "207 PASIR RIS STREET 21",
+      "lat": 1.36630332942513,
+      "lon": 103.962287761409,
+      "postal": "510207"
+    },
+    {
+      "name": "252 PASIR RIS STREET 21",
+      "lat": 1.36817271834193,
+      "lon": 103.962563714825,
+      "postal": "510252"
+    },
+    {
+      "name": "454 PASIR RIS DRIVE 6",
+      "lat": 1.37200972461679,
+      "lon": 103.958089263401,
+      "postal": "510454"
+    },
+    {
+      "name": "482 PASIR RIS DRIVE 4",
+      "lat": 1.37375879162392,
+      "lon": 103.95971509662,
+      "postal": "510482"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.37310127825062,
+      "lon": 103.945674473619,
+      "postal": "510571"
+    },
+    {
+      "name": "634 PASIR RIS DRIVE 1",
+      "lat": 1.37757926860245,
+      "lon": 103.9406595852,
+      "postal": "510634"
+    },
+    {
+      "name": "741 PASIR RIS STREET 71",
+      "lat": 1.37755384677881,
+      "lon": 103.936383536913,
+      "postal": "510741"
+    },
+    {
+      "name": "243 SIMEI STREET 5",
+      "lat": 1.34395928033042,
+      "lon": 103.955168198066,
+      "postal": "520243"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.35191835181459,
+      "lon": 103.959646784075,
+      "postal": "520338"
+    },
+    {
+      "name": "364 TAMPINES STREET 34",
+      "lat": 1.35693800952142,
+      "lon": 103.959873498292,
+      "postal": "520364"
+    },
+    {
+      "name": "494B TAMPINES AVENUE 9",
+      "lat": 1.36300828940548,
+      "lon": 103.952704897502,
+      "postal": "520494"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.3588121878635,
+      "lon": 103.935212702172,
+      "postal": "520717"
+    },
+    {
+      "name": "487B TAMPINES STREET 45",
+      "lat": 1.36026524882674,
+      "lon": 103.958372350188,
+      "postal": "521487"
+    },
+    {
+      "name": "230B TAMPINES STREET 24",
+      "lat": 1.3553984846695,
+      "lon": 103.950733897054,
+      "postal": "525230"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.35660452934466,
+      "lon": 103.883650622241,
+      "postal": "530221"
+    },
+    {
+      "name": "435 HOUGANG AVENUE 8",
+      "lat": 1.37752800104625,
+      "lon": 103.89360316857,
+      "postal": "530435"
+    },
+    {
+      "name": "439 HOUGANG AVENUE 8",
+      "lat": 1.37859799173852,
+      "lon": 103.893427304657,
+      "postal": "530439"
+    },
+    {
+      "name": "449 HOUGANG AVENUE 10",
+      "lat": 1.37878098243894,
+      "lon": 103.895153601863,
+      "postal": "530449"
+    },
+    {
+      "name": "PCF SPARKLETOTS PRESCHOOL @ SENGKANG SOUTH BLK 535 (KN)",
+      "lat": 1.37644174333807,
+      "lon": 103.89013377594,
+      "postal": "530535"
+    },
+    {
+      "name": "553 HOUGANG STREET 51",
+      "lat": 1.37912950419349,
+      "lon": 103.890376362574,
+      "postal": "530553"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.36992238335483,
+      "lon": 103.890925005074,
+      "postal": "530836"
+    },
+    {
+      "name": "925 HOUGANG STREET 91",
+      "lat": 1.37670584605136,
+      "lon": 103.882497236424,
+      "postal": "530925"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.37453653802469,
+      "lon": 103.874596417848,
+      "postal": "550533"
+    },
+    {
+      "name": "617 ANG MO KIO AVENUE 4",
+      "lat": 1.37751709681128,
+      "lon": 103.838053184066,
+      "postal": "560617"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.35803232624061,
+      "lon": 103.848211390712,
+      "postal": "570222"
+    },
+    {
+      "name": "229 BISHAN STREET 23",
+      "lat": 1.35760846214532,
+      "lon": 103.84596290671,
+      "postal": "570229"
+    },
+    {
+      "name": "236 BISHAN STREET 22",
+      "lat": 1.35900490923943,
+      "lon": 103.847006575058,
+      "postal": "570236"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.36019474589915,
+      "lon": 103.84413136044,
+      "postal": "570245"
+    },
+    {
+      "name": "255 BISHAN STREET 22",
+      "lat": 1.36166764006371,
+      "lon": 103.842743222032,
+      "postal": "570255"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.35866825318856,
+      "lon": 103.842069711877,
+      "postal": "570264"
+    },
+    {
+      "name": "BISHAN HEIGHTS",
+      "lat": 1.35628009744133,
+      "lon": 103.845894054401,
+      "postal": "570293"
+    },
+    {
+      "name": "323 TAH CHING ROAD",
+      "lat": 1.3368180785281,
+      "lon": 103.723914562532,
+      "postal": "610323"
+    },
+    {
+      "name": "362 YUNG AN ROAD",
+      "lat": 1.33616155292127,
+      "lon": 103.719783396486,
+      "postal": "610362"
+    },
+    {
+      "name": "PCF SPARKLETOTS PRESCHOOL @ PIONEER 694 (CC)",
+      "lat": 1.34302581073029,
+      "lon": 103.706879612056,
+      "postal": "640694"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.34409760357644,
+      "lon": 103.696723900687,
+      "postal": "640716"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.34442696756266,
+      "lon": 103.698193963126,
+      "postal": "640723"
+    },
+    {
+      "name": "NANYANG SAPPHIRE",
+      "lat": 1.34555322187045,
+      "lon": 103.69876791478,
+      "postal": "640731"
+    },
+    {
+      "name": "GEK POH VILLE",
+      "lat": 1.34760958144611,
+      "lon": 103.699227740175,
+      "postal": "640751"
+    },
+    {
+      "name": "814 JURONG WEST STREET 81",
+      "lat": 1.34566786108845,
+      "lon": 103.695791563809,
+      "postal": "640814"
+    },
+    {
+      "name": "NANYANG PEARL",
+      "lat": 1.3427083627467,
+      "lon": 103.693576643138,
+      "postal": "640836"
+    },
+    {
+      "name": "859 JURONG WEST STREET 81",
+      "lat": 1.34923032309478,
+      "lon": 103.696100644272,
+      "postal": "640859"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.35149041858556,
+      "lon": 103.748701610843,
+      "postal": "650625"
+    },
+    {
+      "name": "NOAH'S ARK CHILDCARE & DEVELOPMENT CENTRE",
+      "lat": 1.38304692121235,
+      "lon": 103.770464368939,
+      "postal": "670439"
+    },
+    {
+      "name": "171A GANGSA ROAD",
+      "lat": 1.37921045305008,
+      "lon": 103.766373351511,
+      "postal": "671171"
+    },
+    {
+      "name": "MY FIRST SKOOL",
+      "lat": 1.3814779003875,
+      "lon": 103.748174139363,
+      "postal": "680208"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.38251530490517,
+      "lon": 103.745366946597,
+      "postal": "680219"
+    },
+    {
+      "name": "237 CHOA CHU KANG CENTRAL",
+      "lat": 1.3794475026281,
+      "lon": 103.748287395227,
+      "postal": "680237"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.37927183528093,
+      "lon": 103.74066488084,
+      "postal": "680289"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.38063288913608,
+      "lon": 103.737541643389,
+      "postal": "680447"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.39371134802136,
+      "lon": 103.743772016448,
+      "postal": "680544"
+    },
+    {
+      "name": "620 CHOA CHU KANG STREET 62",
+      "lat": 1.39957666181485,
+      "lon": 103.747100331609,
+      "postal": "680620"
+    },
+    {
+      "name": "660 CHOA CHU KANG CRESCENT",
+      "lat": 1.40102235751598,
+      "lon": 103.749862447053,
+      "postal": "680660"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.39461112561124,
+      "lon": 103.747911196374,
+      "postal": "680785"
+    },
+    {
+      "name": "368 WOODLANDS AVENUE 1",
+      "lat": 1.43294240133526,
+      "lon": 103.786732547129,
+      "postal": "730368"
+    },
+    {
+      "name": "HANIS MONTESSORI KINDERGARTEN (WOODLANDS)",
+      "lat": 1.42729302492584,
+      "lon": 103.774859396818,
+      "postal": "730424"
+    },
+    {
+      "name": "CARE CORNER FAMILY SERVICE CENTRE (ADMIRALTY)",
+      "lat": 1.44159550542694,
+      "lon": 103.801106488879,
+      "postal": "730718"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.44317276410265,
+      "lon": 103.795008218691,
+      "postal": "730747"
+    },
+    {
+      "name": "810 WOODLANDS STREET 81",
+      "lat": 1.44267221161224,
+      "lon": 103.788152306679,
+      "postal": "730810"
+    },
+    {
+      "name": "HDB PUBLIC SHELTERS",
+      "lat": 1.44479630064956,
+      "lon": 103.790602761905,
+      "postal": "730876"
+    },
+    {
+      "name": "LITTLE STARS ACADEMY (WOODLANDS)",
+      "lat": 1.43580504563585,
+      "lon": 103.795253989203,
+      "postal": "730899"
+    },
+    {
+      "name": "894B WOODLANDS DRIVE 50",
+      "lat": 1.43600943919705,
+      "lon": 103.789507492911,
+      "postal": "731894"
+    },
+    {
+      "name": "LAVENDER MRT STATION (EW11)",
+      "lat": 1.30737781747063,
+      "lon": 103.862767633888,
+      "postal": "208699"
+    },
+    {
+      "name": "FARRER PARK MRT STATION (NE8)",
+      "lat": 1.31190557325774,
+      "lon": 103.853477716509,
+      "postal": "218703"
+    },
+    {
+      "name": "BUANGKOK MRT STATION (NE15)",
+      "lat": 1.38287001971672,
+      "lon": 103.893122569706,
+      "postal": "545061"
+    },
+    {
+      "name": "HAW PAR VILLA MRT STATION (CC25)",
+      "lat": 1.28257135772488,
+      "lon": 103.781752725064,
+      "postal": "117396"
+    },
+    {
+      "name": "MACPHERSON MRT STATION (DT26)",
+      "lat": 1.32615024457361,
+      "lon": 103.889298600376,
+      "postal": "378956"
+    },
+    {
+      "name": "BISHAN MRT STATION (NS17)",
+      "lat": 1.35083898784737,
+      "lon": 103.848143964542,
+      "postal": "579827"
+    },
+    {
+      "name": "BEDOK RESERVOIR MRT STATION (DT30)",
+      "lat": 1.33660782955099,
+      "lon": 103.932234623286,
+      "postal": "469724"
+    },
+    {
+      "name": "BEAUTY WORLD MRT STATION (DT5)",
+      "lat": 1.34122317558549,
+      "lon": 103.775794285083,
+      "postal": "588216"
+    },
+    {
+      "name": "LENTOR MRT STATION (TE5)",
+      "lat": 1.38550657972169,
+      "lon": 103.835743809669,
+      "postal": "789361"
+    },
+    {
+      "name": "SIGLAP MRT STATION (TE28)",
+      "lat": 1.31000869432289,
+      "lon": 103.930025826708,
+      "postal": "449969"
+    },
+    {
+      "name": "ACCOUNTING AND CORPORATE REGULATORY AUTHORITY (ACRA)",
+      "lat": 1.31978249878705,
+      "lon": 103.842142960008,
+      "postal": "307987"
+    },
+    {
+      "name": "NEW TOWN SECONDARY SCHOOL",
+      "lat": 1.30977590011357,
+      "lon": 103.77318863421,
+      "postal": "139657"
+    },
+    {
+      "name": "ANGLO-CHINESE SCHOOL (JUNIOR)",
+      "lat": 1.30935041274966,
+      "lon": 103.840950265464,
+      "postal": "227988"
+    },
+    {
+      "name": "DUNMAN HIGH SCHOOL",
+      "lat": 1.29996216014962,
+      "lon": 103.88294155989,
+      "postal": "436895"
+    },
+    {
+      "name": "MERIDIAN SECONDARY SCHOOL",
+      "lat": 1.3672468492013,
+      "lon": 103.948972483629,
+      "postal": "518901"
+    },
+    {
+      "name": "CHANGKAT CHANGI SECONDARY SCHOOL",
+      "lat": 1.33950630072876,
+      "lon": 103.953245525564,
+      "postal": "529894"
+    },
+    {
+      "name": "SAINT GABRIEL'S SECONDARY SCHOOL",
+      "lat": 1.34648798732177,
+      "lon": 103.876094163287,
+      "postal": "556140"
+    },
+    {
+      "name": "PEIRCE SECONDARY SCHOOL",
+      "lat": 1.36665944653812,
+      "lon": 103.83021606804,
+      "postal": "575566"
+    },
+    {
+      "name": "ONE WORLD INTERNATIONAL SCHOOL (NANYANG CAMPUS)",
+      "lat": 1.34761307060846,
+      "lon": 103.694769257465,
+      "postal": "649075"
+    },
+    {
+      "name": "UNITY SECONDARY SCHOOL",
+      "lat": 1.40001524119441,
+      "lon": 103.74602091483,
+      "postal": "689143"
+    },
+    {
+      "name": "ORCHID PARK SECONDARY SCHOOL",
+      "lat": 1.41532032779634,
+      "lon": 103.837859241343,
+      "postal": "768454"
+    }
+  ]
+}

@@ -8,63 +8,49 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
         const features = [];
 
         incidents.forEach(inc => {
-            const stability = isNightMode ? 'F' : 'D'; // Night = Highly Stable
-            
-            // Base emission rate. We parse the specific chemical's Q, or default to Chlorine.
-            // If the user specified an `amount` in kg, we can scale Q proportionally.
+            const stability = isNightMode ? 'F' : 'D'; 
             const baseQ = CHEMICAL_Q_RATES[inc.details?.type] || CHEMICAL_Q_RATES.CHLORINE_GAS; 
             const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
-            const Q = baseQ * Math.pow(massRatio, 1.25); // Exaggerates visual thickness for smaller spills
+            const Q = baseQ * Math.pow(massRatio, 1.25);
             
-            let dynamicColor;
-            if (inc.details?.status === 'Resolved') {
-                dynamicColor = '#10b981';
-            } else {
-                // Core physical decay color interpolator (Yellow -> Orange -> Red) mapped to 5 environmental minutes (300s)
-                // This aligns visual 'fully grown' with mechanical plume bounding expansion.
-                const lifeRatio = Math.min(1, Math.max(0, (inc.elapsedSimSec || 0) / 300));
-                
-                let r, g, b;
-                if (lifeRatio < 0.5) {
-                    // Dark Amber (#b45309) -> Dark Orange (#c2410c)
-                    const t = lifeRatio * 2; // scale 0-0.5 to 0-1
-                    r = Math.round(180 + (194 - 180) * t); // 180 -> 194
-                    g = Math.round(83 + (65 - 83) * t);    // 83 -> 65
-                    b = Math.round(9 + (12 - 9) * t);      // 9 -> 12
-                } else {
-                    // Dark Orange (#c2410c) -> Dark Red (#b91c1c)
-                    const t = (lifeRatio - 0.5) * 2; // scale 0.5-1 to 0-1
-                    r = Math.round(194 + (185 - 194) * t); // 194 -> 185
-                    g = Math.round(65 + (28 - 65) * t);    // 65 -> 28
-                    b = Math.round(12 + (28 - 12) * t);    // 12 -> 28
-                }
-                dynamicColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
-            }
-            
-            // Map the Gaussian IDLH bounding shape mathematically into geographic space
-            const polyCoords = PlumePhysics.generatePlumePolygon(
-                inc.position, 
-                wind.speed, 
-                wind.direction, 
-                Q, 
-                stability,
-                inc.elapsedSimSec || 0
-            );
+            const isResolved = inc.details?.status === 'Resolved';
+            const elapsed = inc.elapsedSimSec || 0;
 
-            if (polyCoords && polyCoords.length > 2) {
-                features.push({
-                    type: 'Feature',
-                    geometry: {
-                        type: 'Polygon',
-                        coordinates: [polyCoords]
-                    },
-                    properties: {
-                        color: dynamicColor,
-                        id: inc.id,
-                        isResolved: inc.details?.status === 'Resolved'
-                    }
-                });
-            }
+            // International Emergency Zones
+            const ZONES = [
+                { level: 'Cold', limit: 0.2, color: isResolved ? '#059669' : '#22c55e' },   // Green
+                { level: 'Warm', limit: 1.0, color: isResolved ? '#047857' : '#eab308' },   // Yellow
+                { level: 'Hot',  limit: 3.0, color: isResolved ? '#064e3b' : '#ef4444' }    // Red
+            ];
+
+            // Push from largest (Cold) to smallest (Hot) so Hot renders on top
+            ZONES.forEach(zone => {
+                const polyCoords = PlumePhysics.generatePlumePolygon(
+                    inc.position, 
+                    wind.speed, 
+                    wind.direction, 
+                    Q, 
+                    stability,
+                    elapsed,
+                    zone.limit
+                );
+
+                if (polyCoords && polyCoords.length > 2) {
+                    features.push({
+                        type: 'Feature',
+                        geometry: {
+                            type: 'Polygon',
+                            coordinates: [polyCoords]
+                        },
+                        properties: {
+                            color: zone.color,
+                            id: inc.id,
+                            isResolved: isResolved,
+                            zoneLevel: zone.level
+                        }
+                    });
+                }
+            });
         });
 
         return {
@@ -81,13 +67,20 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
             'fill-opacity': [
                 'case',
                 ['get', 'isResolved'],
-                0.4, // Muted opacity for resolved plumes
+                0.2, // Muted opacity for resolved plumes
                 selectedIncidentId ? [
                     'case',
                     ['==', ['get', 'id'], selectedIncidentId],
-                    0.8, // Highlight specifically 
-                    0.3  // Dim others
-                ] : 0.7 // Standard opacity
+                    0.5, // Highlight specifically 
+                    0.1  // Dim others
+                ] : [
+                    'match',
+                    ['get', 'zoneLevel'],
+                    'Hot', 0.6,
+                    'Warm', 0.4,
+                    'Cold', 0.2,
+                    0.4
+                ] // Staggered opacity for visual depth
             ]
         }
     };
@@ -100,20 +93,27 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
             'line-color': [
                 'case',
                 ['get', 'isResolved'],
-                '#10b981', // Muted green outline
-                '#ffffff'
+                '#10b981', 
+                ['get', 'color'] // Match outline to the zone color
             ],
             'line-width': selectedIncidentId ? [
                 'case',
                 ['==', ['get', 'id'], selectedIncidentId],
-                3,
+                2,
+                0.5
+            ] : [
+                'match',
+                ['get', 'zoneLevel'],
+                'Hot', 2,
+                'Warm', 1.5,
+                'Cold', 1,
                 1
-            ] : 3,
+            ],
             'line-opacity': [
                 'case',
                 ['get', 'isResolved'],
-                0.6,
-                0.9
+                0.4,
+                0.8
             ]
         }
     };

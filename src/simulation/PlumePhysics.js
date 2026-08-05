@@ -27,10 +27,9 @@ export class PlumePhysics {
     /**
      * Determines mathematically in O(1) if a given GPS coordinate is within the active IDLH hazard boundary.
      */
-    static checkCollision(agentPos, incPos, windSpeed, windDirection, Q, stabilityClass = 'D') {
-        const u = Math.max(0.5, windSpeed);
+    static checkCollision(agentPos, incPos, windSpeedKmH, windDirection, Q, stabilityClass = 'D', C_limit = 1, tElapsedSec = 0) {
+        const u = Math.max(0.5, windSpeedKmH * 0.277778);
         const stability = PASQUILL_GIFFORD[stabilityClass] || PASQUILL_GIFFORD.D;
-        const C_limit = 1;
 
         // Metric geographic offset
         const mToLat = 111320;
@@ -47,6 +46,9 @@ export class PlumePhysics {
         const y = dx_m * Math.sin(rad) + dy_m * Math.cos(rad);
 
         if (x < 0) return false; // Upwind of the source (Gaussian mathematically ignores upwind diffusion)
+        
+        const maxTravelDist = u * tElapsedSec;
+        if (x > maxTravelDist) return false; // Plume hasn't physically reached this distance yet
 
         const x_km = Math.max(0.01, x / 1000);
         
@@ -67,12 +69,12 @@ export class PlumePhysics {
      * @param {Number} Q Emission Rate (g/s)
      * @param {String} stabilityClass 'D' or 'F'
      * @param {Number} tElapsedSec Physical simulation clock
+     * @param {Number} C_limit The concentration limit defining the boundary contour.
      * @returns {Array} Polygon Coordinate Matrix
      */
-    static generatePlumePolygon(center, windSpeedKmH, windDirection, Q, stabilityClass = 'D', tElapsedSec = 0) {
+    static generatePlumePolygon(center, windSpeedKmH, windDirection, Q, stabilityClass = 'D', tElapsedSec = 0, C_limit = 1) {
         const u = Math.max(0.5, windSpeedKmH * 0.277778); // Strict mapped km/h environmental drag into Gaussian m/s velocity
         const stability = PASQUILL_GIFFORD[stabilityClass] || PASQUILL_GIFFORD.D;
-        const C_limit = 1; // Base normalized IDLH parameter
         
         // Geographic Plume Expansion Cap Limit based on active physical time elapsed
         const maxTravelDist = u * tElapsedSec;

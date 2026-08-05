@@ -3,11 +3,21 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MapComponent from './MapComponent';
 import UIOverlay from './UIOverlay';
 import { SimulationController } from '../simulation/SimulationController';
-import { XCircle, CheckCircle2, ShieldAlert, X, Moon, Sun, Hand, Server, Wind } from 'lucide-react';
+import { XCircle, CheckCircle2, ShieldAlert, X, Moon, Sun, Hand, Server, Wind, List, Search, Filter, Eye, EyeOff, AlertTriangle, Droplets, Zap, Activity, MapPin } from 'lucide-react';
 import supabase from '../supabase';
 import { HAZARD_DATABASE } from '../constants/HazardDatabase';
 import SimulationWsService from '../services/SimulationWsService';
 import { fetchWindData } from '../services/WindService';
+
+const getTypeIcon = (type) => {
+    if (!type) return <AlertTriangle className="w-5 h-5" />;
+    const t = type.toLowerCase();
+    if (t.includes('chemical') || t.includes('spill') || t.includes('bio')) return <Droplets className="w-5 h-5 text-purple-400" />;
+    if (t.includes('gas') || t.includes('smoke')) return <Wind className="w-5 h-5 text-gray-400" />;
+    if (t.includes('radiation')) return <Zap className="w-5 h-5 text-amber-500" />;
+    if (t.includes('fire')) return <Activity className="w-5 h-5 text-red-500" />;
+    return <AlertTriangle className="w-5 h-5 text-red-400" />;
+};
 
 const SimulationMode = ({ onExit, theme }) => {
     const simulationRef = useRef(null);
@@ -17,6 +27,7 @@ const SimulationMode = ({ onExit, theme }) => {
     // Simulation State (Synced for Rendering)
     const [agents, setAgents] = useState([]);
     const [incidents, setIncidents] = useState([]);
+    const [selectedIncident, setSelectedIncident] = useState(null);
     const [wind, setWind] = useState({ speed: 10, direction: 45, stabilityClass: 'D', weather: { temp: 28, rain: 0, hum: 80 } });
     const [stats, setStats] = useState({ activeIncidents: 0, safetyIndex: 100 });
     const [status, setStatus] = useState('Clear');
@@ -35,6 +46,13 @@ const SimulationMode = ({ onExit, theme }) => {
 
     const [pendingIncidentCoord, setPendingIncidentCoord] = useState(null);
     const [isNightMode, setIsNightMode] = useState(false);
+    
+    // Sidebar & Filter State
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'In-progress', 'Resolved'
+    const [typeFilter, setTypeFilter] = useState('All');
+    
     const [incidentForm, setIncidentForm] = useState({
         Title: '',
         Type: 'CHLORINE_GAS',
@@ -190,6 +208,21 @@ const SimulationMode = ({ onExit, theme }) => {
         if (simulationRef.current) {
             simulationRef.current.wind = { ...simulationRef.current.wind, ...newWind };
         }
+    }, []);
+
+    const handleMapClick = useCallback((lngLat) => {
+        setPendingIncidentCoord(lngLat);
+        setSelectedIncident(null);
+        setIncidentForm(prev => ({
+            ...prev,
+            Title: '',
+            Details: ''
+        }));
+    }, []);
+
+    const handleIncidentClick = useCallback((inc) => {
+        setSelectedIncident(inc);
+        setPendingIncidentCoord(null);
     }, []);
 
     const cancelAddIncident = () => {
@@ -349,9 +382,10 @@ const SimulationMode = ({ onExit, theme }) => {
                     wind={wind}
                     isNightMode={isNightMode}
                     onWindChange={handleWindChange}
-                    onLocationSelect={handleAddIncident}
+                    onLocationSelect={handleMapClick}
                     onAddIncidentDirect={handleAddIncidentDirect}
                     onResolveIncident={handleResolveIncident}
+                    onIncidentClick={handleIncidentClick}
                     onHandStatusChange={setIsHandDetected}
                     theme={theme}
                 />
@@ -379,6 +413,241 @@ const SimulationMode = ({ onExit, theme }) => {
                         </span>
                     )}
                 </div>
+
+                {/* Floating Sidebar Toggle Button */}
+                <AnimatePresence>
+                    {!isSidebarOpen && (
+                        <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            className="absolute bottom-10 left-6 z-30 pointer-events-auto"
+                        >
+                            <button
+                                onClick={() => setIsSidebarOpen(true)}
+                                className="bg-white/90 dark:bg-gray-900/90 hover:bg-white dark:hover:bg-gray-800 backdrop-blur-xl border border-gray-200 dark:border-gray-800 text-brand-dark dark:text-white shadow-xl flex items-center gap-3 text-sm font-bold tracking-wide transition-all rounded-2xl px-5 py-4"
+                            >
+                                <div className="w-8 h-8 rounded-full bg-brand-light/20 flex items-center justify-center">
+                                    <List className="w-4 h-4 text-brand-dark dark:text-brand-light" />
+                                </div>
+                                Incident Database
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Draggable Sidebar List */}
+                <AnimatePresence>
+                    {isSidebarOpen && (
+                        <motion.div
+                            drag
+                            dragMomentum={false}
+                            initial={{ x: '-100%', opacity: 0 }}
+                            animate={{ x: 0, opacity: 1 }}
+                            exit={{ x: '-100%', opacity: 0 }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                            className="absolute top-24 left-4 w-80 max-h-[75vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-[70] overflow-hidden transition-colors duration-300 cursor-move"
+                        >
+                            {/* Sidebar Header & Filters */}
+                            <div className="p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex flex-col gap-3 transition-colors duration-300">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-gray-900 dark:text-white font-bold tracking-wide flex items-center gap-2">
+                                        <List className="w-5 h-5 text-amber-500" />
+                                        Sandbox Incidents
+                                    </h2>
+                                    <button
+                                        onClick={() => setIsSidebarOpen(false)}
+                                        className="p-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 rounded-lg transition-colors flex items-center justify-center bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+
+                                {/* Search */}
+                                <div className="relative">
+                                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search sandbox incidents..."
+                                        value={searchQuery}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-9 pr-3 py-1.5 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors placeholder-gray-400 cursor-text"
+                                    />
+                                </div>
+
+                                {/* Filters */}
+                                <div className="flex gap-2">
+                                    <div className="flex-1 relative">
+                                        <Filter className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                                        <select
+                                            value={statusFilter}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            onChange={(e) => setStatusFilter(e.target.value)}
+                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-7 pr-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-amber-500 transition-colors appearance-none cursor-pointer"
+                                        >
+                                            <option value="All">All Status</option>
+                                            <option value="In-progress">Ongoing</option>
+                                            <option value="Resolved">Resolved</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex-1">
+                                        <select
+                                            value={typeFilter}
+                                            onPointerDown={(e) => e.stopPropagation()}
+                                            onChange={(e) => setTypeFilter(e.target.value)}
+                                            className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-700 dark:text-gray-300 focus:outline-none focus:border-amber-500 transition-colors appearance-none cursor-pointer"
+                                        >
+                                            <option value="All">All Types</option>
+                                            {Object.entries(HAZARD_DATABASE).map(([key, config]) => (
+                                                <option key={key} value={key}>{config.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Incident List Body */}
+                            <div 
+                                className="flex-1 overflow-y-auto p-2 space-y-2 cursor-auto"
+                                onPointerDown={(e) => e.stopPropagation()}
+                            >
+                                {incidents.filter(inc => {
+                                    const matchesSearch = (inc.details?.type || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                        (inc.details?.desc || '').toLowerCase().includes(searchQuery.toLowerCase());
+                                    const matchesStatus = statusFilter === 'All' || inc.details?.status === statusFilter;
+                                    const matchesType = typeFilter === 'All' || inc.details?.type === typeFilter;
+                                    return matchesSearch && matchesStatus && matchesType;
+                                }).length === 0 ? (
+                                    <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400">
+                                        No incidents found matching filters.
+                                    </div>
+                                ) : (
+                                    incidents.filter(inc => {
+                                        const matchesSearch = (inc.details?.type || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                            (inc.details?.desc || '').toLowerCase().includes(searchQuery.toLowerCase());
+                                        const matchesStatus = statusFilter === 'All' || inc.details?.status === statusFilter;
+                                        const matchesType = typeFilter === 'All' || inc.details?.type === typeFilter;
+                                        return matchesSearch && matchesStatus && matchesType;
+                                    }).map((inc) => (
+                                        <div
+                                            key={inc.id}
+                                            onClick={() => handleIncidentClick(inc)}
+                                            className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedIncident?.id === inc.id
+                                                ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/30 shadow-md'
+                                                : 'bg-white dark:bg-gray-800/50 border-gray-100 dark:border-gray-800 hover:border-amber-200 dark:hover:border-amber-500/30 hover:shadow-sm'
+                                                }`}
+                                        >
+                                            <div className="flex justify-between items-start mb-1">
+                                                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 line-clamp-1">
+                                                    {inc.details?.title || HAZARD_DATABASE[inc.details?.type]?.name || inc.details?.type || 'Unknown Hazard'}
+                                                </h3>
+                                                <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${inc.details?.status === 'In-progress' ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400' : 'bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400'}`}>
+                                                    {inc.details?.status === 'In-progress' ? 'Ongoing' : 'Resolved'}
+                                                </span>
+                                            </div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2 leading-relaxed">
+                                                {inc.details?.desc}
+                                            </div>
+                                            <div className="flex justify-between items-center text-[10px] text-gray-400 font-mono mt-1.5">
+                                                <span>Amount: {inc.details?.amount || 100}</span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+                {/* Draggable Incident Details Side Panel */}
+                <AnimatePresence>
+                    {selectedIncident && (
+                        <motion.div
+                            drag
+                            dragMomentum={false}
+                            initial={{ x: '100%', opacity: 0 }}
+                            animate={{ x: 0, opacity: 1 }}
+                            exit={{ x: '100%', opacity: 0 }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                            className="absolute top-4 right-4 h-[85vh] w-96 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden transition-colors duration-300 cursor-move"
+                        >
+                            {/* Header */}
+                            <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between bg-gray-50 dark:bg-gray-900/50 transition-colors duration-300">
+                                <div className="flex gap-4">
+                                    <div className="p-3 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl shrink-0">
+                                        {getTypeIcon(selectedIncident.details?.type)}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-gray-900 dark:text-white font-bold text-lg leading-tight mb-1">
+                                            {selectedIncident.details?.title || selectedIncident.details?.type || 'Unknown Hazard'}
+                                        </h2>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${selectedIncident.details?.status === 'In-progress' ? 'bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30' : 'bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-500/30'}`}>
+                                                {selectedIncident.details?.status === 'In-progress' ? 'Ongoing' : 'Resolved'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedIncident(null)}
+                                    className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            {/* Body */}
+                            <div className="flex-1 overflow-y-auto p-6 scrollbar-hide space-y-6">
+                                {/* Details Grid */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    {/* Coordinates */}
+                                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300">
+                                        <MapPin className="w-5 h-5 text-gray-400" />
+                                        <div>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Location</p>
+                                            <p className="text-sm font-mono">{selectedIncident.position[1].toFixed(5)}, {selectedIncident.position[0].toFixed(5)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300">
+                                        <Server className="w-5 h-5 text-gray-400" />
+                                        <div>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Source DB</p>
+                                            <p className="text-sm font-mono text-amber-500 font-medium">SANDBOX</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Description */}
+                                <div>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Description</p>
+                                    <p className="text-sm text-gray-900 dark:text-gray-200 leading-relaxed bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
+                                        {selectedIncident.details?.desc || 'No description provided.'}
+                                    </p>
+                                </div>
+
+                                {/* Sandbox Controls */}
+                                {selectedIncident.details?.status === 'In-progress' && (
+                                    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-800">
+                                        <button
+                                            onClick={() => {
+                                                handleResolveIncident(selectedIncident.id);
+                                                setSelectedIncident(prev => ({
+                                                    ...prev,
+                                                    details: { ...prev.details, status: 'Resolved' }
+                                                }));
+                                            }}
+                                            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all hover:-translate-y-0.5 active:translate-y-0"
+                                        >
+                                            <CheckCircle2 className="w-5 h-5" />
+                                            Resolve Sandbox Incident
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* UI Overlay */}
                 <UIOverlay

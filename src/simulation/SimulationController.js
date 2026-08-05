@@ -3,7 +3,9 @@ import { HAZARD_DATABASE } from '../constants/HazardDatabase';
 import { ChemicalDispersionEngine } from './ChemicalDispersionEngine';
 import { PARK_BOUNDS, EXITS, SIM_CONSTANTS } from '../data/ParkData';
 import { fetchWindData } from '../services/WindService';
+import { PlumePhysics, CHEMICAL_Q_RATES } from './PlumePhysics';
 import ParkGraph from '../data/ParkGraph.json';
+import SheltersData from '../data/Shelters.json';
 
 export class SimulationController {
     constructor() {
@@ -129,11 +131,44 @@ export class SimulationController {
 
         this.nodes = filteredNodes;
 
-        console.log(`Graph Built & Filtered: ${Object.keys(this.nodes).length} nodes, ${edgeCount} edges (Largest Connected Component within bounds).`);
+        // --- INJECT CD SHELTERS AS NODES ---
+        const shelters = SheltersData.shelters || [];
+        const latScale = 111.32;
+        const lonScale = 111.32 * Math.cos(1.3 * (Math.PI / 180));
+        
+        shelters.forEach((shelter, idx) => {
+            const shelterId = `cd-shelter-${idx}`;
+            
+            // Find closest existing node in filteredNodes
+            let closestNodeId = null;
+            let minDist = Infinity;
+            Object.entries(this.nodes).forEach(([id, node]) => {
+                const dLat = (node.lat - shelter.lat) * latScale;
+                const dLon = (node.lon - shelter.lon) * lonScale;
+                const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestNodeId = id;
+                }
+            });
+
+            if (closestNodeId) {
+                // Add shelter as a new graph node
+                this.nodes[shelterId] = {
+                    id: shelterId,
+                    lon: shelter.lon,
+                    lat: shelter.lat,
+                    neighbors: [closestNodeId]
+                };
+                // Connect the closest node to the shelter
+                this.nodes[closestNodeId].neighbors.push(shelterId);
+            }
+        });
+
+        console.log(`Graph Built & Filtered: ${Object.keys(this.nodes).length} nodes, ${edgeCount} edges (Largest Connected Component within bounds + Shelters).`);
     }
 
     identifyDynamicSafeNodes() {
-        // Only count ongoing incidents
         const activeIncidents = this.incidents.filter(inc => inc.details?.status !== 'Resolved');
         if (activeIncidents.length === 0) {
             this.safeNodes = [];
@@ -141,96 +176,38 @@ export class SimulationController {
             return;
         }
 
-        // Lat/Lon scaling factors (approx for Singapore lat ~1.3)
         const latScale = 111.32;
-        // cos(1.3 deg) is almost 1, but let's be precise enough
         const lonScale = 111.32 * Math.cos(1.3 * (Math.PI / 180));
+        const shelters = SheltersData.shelters || [];
 
-        const possibleNodes = [];
-
-        Object.entries(this.nodes).forEach(([id, node]) => {
-            // Find distance to the NEAREST incident
-            let minDistToAnyIncident = Infinity;
-
-            for (const incident of this.incidents) {
-                if (incident.details?.status === 'Resolved') continue;
-                const [iLon, iLat] = incident.position;
-                const dLat = (node.lat - iLat) * latScale;
-                const dLon = (node.lon - iLon) * lonScale;
-                const dist = Math.sqrt(dLat * dLat + dLon * dLon); // km
-
-                if (dist < minDistToAnyIncident) {
-                    minDistToAnyIncident = dist;
-                }
-            }
-
-            // Store the Minimum Distance (Safety Score)
-            possibleNodes.push({ id, dist: minDistToAnyIncident });
-        });
-
-        // 1. Filter nodes > 0.4km from ALL incidents
-        // 0.4km gives adequate safety time while opening up more areas of the park
-        let candidates = possibleNodes.filter(n => n.dist >= 0.4);
-        console.log(`[DEBUG] checked ${possibleNodes.length} nodes against ${this.incidents.length} incidents. Found ${candidates.length} safe keys (>0.4km).`);
-
-        // 2. Fallback: If no nodes > 0.4km, take top 10% furthest from their nearest threat
-        if (candidates.length === 0) {
-            console.warn("[DEBUG] No nodes > 0.4km found. Using furthest available nodes.");
-            candidates = possibleNodes.sort((a, b) => b.dist - a.dist).slice(0, Math.ceil(possibleNodes.length * 0.10));
-        }
-
-        // 3. Guaranteed Fallback
-        if (candidates.length === 0 && possibleNodes.length > 0) {
-            candidates.push(possibleNodes[0]);
-        }
-
-        // Sort candidates by safety (safest first)
-        candidates.sort((a, b) => b.dist - a.dist);
-
-        // 4. Spatially Distribute the Safe Nodes
-        // Instead of taking the 20 absolute furthest (which form a clustered clump),
-        // we enforce a minimum geographic spacing (0.1km / 100m) between safe nodes.
-        const selected = [];
-        for (const candidate of candidates) {
-            if (selected.length >= 20) break;
-
-            const cNode = this.nodes[candidate.id];
-            
-            // Check distance to all ALREADY selected safe nodes
-            let isSpaced = true;
-            for (const selId of selected) {
-                const sNode = this.nodes[selId];
-                const dLat = (cNode.lat - sNode.lat) * latScale;
-                const dLon = (cNode.lon - sNode.lon) * lonScale;
-                const distToOtherSafeNode = Math.sqrt(dLat * dLat + dLon * dLon);
-                
-                if (distToOtherSafeNode < 0.1) { // 100 meters spacing requirement
-                    isSpaced = false;
+        // 1. Filter out shelters that are too close to the hazard (e.g. < 1km)
+        const safeShelters = shelters.filter(shelter => {
+            let isSafe = true;
+            for (const inc of activeIncidents) {
+                const [iLon, iLat] = inc.position;
+                const dLat = (shelter.lat - iLat) * latScale;
+                const dLon = (shelter.lon - iLon) * lonScale;
+                const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+                if (dist < 1.0) { // 1km safety radius
+                    isSafe = false;
                     break;
                 }
             }
+            return isSafe;
+        });
 
-            if (isSpaced) {
-                selected.push(candidate.id);
-            }
-        }
+        const usableShelters = safeShelters.length > 0 ? safeShelters : shelters; // Fallback to all if none safe
 
-        // 5. Fallback Fill
-        // If the spacing rule eliminated too many nodes and we have less than 5,
-        // just fill the rest with the safest available ones we skipped to ensure enough destinations
-        if (selected.length < 5) {
-            for (const candidate of candidates) {
-                if (selected.length >= 20) break;
-                if (!selected.includes(candidate.id)) {
-                    selected.push(candidate.id);
-                }
-            }
-        }
+        // Map usable shelters to their injected graph node IDs
+        const shelterNodeIds = usableShelters.map(shelter => {
+            const idx = shelters.findIndex(s => s.lon === shelter.lon && s.lat === shelter.lat);
+            return `cd-shelter-${idx}`;
+        });
 
-        this.safeNodes = selected;
+        this.safeNodes = shelterNodeIds; // Agents will pathfind straight to the CD Shelters
+        this.activeShelters = usableShelters; // Store for advanced use if needed later
         this.safeNodesVersion++;
-
-        console.log(`[DEBUG] Final Safe Nodes IDs:`, this.safeNodes);
+        console.log(`[DEBUG] Final Safe Nodes IDs (Shelters):`, this.safeNodes);
     }
 
     async updateWindFromAPI(force = false) {
@@ -628,6 +605,33 @@ export class SimulationController {
 
         // Update Agents
         this.agents.forEach(agent => {
+            // Determine Exposure to ANY hazard (Cold Zone threshold C_limit = 0.2)
+            let exposed = false;
+            for (const inc of this.incidents) {
+                if (inc.details?.status === 'Resolved') continue;
+                
+                const baseQ = CHEMICAL_Q_RATES[inc.details?.type] || CHEMICAL_Q_RATES.CHLORINE_GAS; 
+                const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
+                const Q = baseQ * Math.pow(massRatio, 1.25);
+                
+                const hit = PlumePhysics.checkCollision(
+                    agent.position, 
+                    inc.position, 
+                    this.wind.speed, 
+                    this.wind.direction, 
+                    Q, 
+                    this.isNightMode ? 'F' : 'D', 
+                    0.2, // Cold Zone boundary
+                    inc.elapsedSimSec || 0
+                );
+                
+                if (hit) {
+                    exposed = true;
+                    break;
+                }
+            }
+            agent.isExposed = exposed;
+
             if (agent.state === 'ESCAPED') return;
 
             // Precise Real-World Scaling: 
