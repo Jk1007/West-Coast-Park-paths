@@ -132,7 +132,8 @@ export class SimulationController {
         this.nodes = filteredNodes;
 
         // --- INJECT CD SHELTERS AS NODES ---
-        const shelters = SheltersData.shelters || [];
+        // Only include MRT stations as safe zones per user request
+        const shelters = (SheltersData.shelters || []).filter(s => s.name && s.name.toUpperCase().includes('MRT'));
         const latScale = 111.32;
         const lonScale = 111.32 * Math.cos(1.3 * (Math.PI / 180));
         
@@ -178,7 +179,9 @@ export class SimulationController {
 
         const latScale = 111.32;
         const lonScale = 111.32 * Math.cos(1.3 * (Math.PI / 180));
-        const shelters = SheltersData.shelters || [];
+        
+        // Only include MRT stations as safe zones per user request
+        const shelters = (SheltersData.shelters || []).filter(s => s.name && s.name.toUpperCase().includes('MRT'));
 
         // 1. Filter out shelters that are too close to the hazard (e.g. < 1km)
         const safeShelters = shelters.filter(shelter => {
@@ -620,7 +623,7 @@ export class SimulationController {
                     this.wind.speed, 
                     this.wind.direction, 
                     Q, 
-                    this.isNightMode ? 'F' : 'D', 
+                    this.wind.stabilityClass || (this.isNightMode ? 'F' : 'D'), 
                     0.2, // Cold Zone boundary
                     inc.elapsedSimSec || 0
                 );
@@ -630,7 +633,9 @@ export class SimulationController {
                     break;
                 }
             }
-            agent.isExposed = exposed;
+            if (exposed) {
+                agent.isExposed = true;
+            }
 
             if (agent.state === 'ESCAPED') return;
 

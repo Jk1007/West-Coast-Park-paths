@@ -1,574 +1,417 @@
 {
   "shelters": [
     {
-      "name": "TELOK BLANGAH COMMUNITY CLUB",
-      "lat": 1.27486265714118,
-      "lon": 103.807875425734,
-      "postal": "108943"
+      "name": "Tiong Bahru MRT Station(East-West Line)",
+      "lat": 1.28610253615775,
+      "lon": 103.827445112419,
+      "postalCode": "168731",
+      "address": "300 TIONG BAHRU ROAD"
     },
     {
-      "name": "HOLLAND-BUKIT PANJANG TOWN COUNCIL (ULU PANDAN OFFICE)",
-      "lat": 1.31205215005861,
-      "lon": 103.789581047341,
-      "postal": "279621"
+      "name": "Bugis MRT Station (East-West Line)",
+      "lat": 1.30046508509717,
+      "lon": 103.855706730933,
+      "postalCode": "188022",
+      "address": "220 VICTORIA STREET"
     },
     {
-      "name": "NKF DIALYSIS CENTRE",
-      "lat": 1.33525355606987,
-      "lon": 103.845209814245,
-      "postal": "319642"
-    },
-    {
-      "name": "PASIR RIS ELIAS COMMUNITY CLUB",
-      "lat": 1.37843931155902,
-      "lon": 103.942549067451,
-      "postal": "519498"
-    },
-    {
-      "name": "SSA HEADQUARTERS",
-      "lat": 1.34803139525891,
-      "lon": 103.935566566923,
-      "postal": "529014"
-    },
-    {
-      "name": "TAMPINES EAST COMMUNITY CLUB",
-      "lat": 1.35335683374898,
-      "lon": 103.954620457783,
-      "postal": "529341"
-    },
-    {
-      "name": "PUNGGOL COMMUNITY CLUB",
-      "lat": 1.37436998821947,
-      "lon": 103.891911930322,
-      "postal": "538808"
-    },
-    {
-      "name": "HONG KAH NORTH COMMUNITY CLUB",
-      "lat": 1.35903339724932,
-      "lon": 103.749486819843,
-      "postal": "659440"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.29207178095009,
-      "lon": 103.814949924871,
-      "postal": "140132"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.30746713452173,
-      "lon": 103.797185887665,
-      "postal": "271030"
-    },
-    {
-      "name": "80B LORONG 4 TOA PAYOH",
-      "lat": 1.33529401120542,
-      "lon": 103.849888208873,
-      "postal": "312080"
-    },
-    {
-      "name": "EUNOS DAMAI VILLE",
-      "lat": 1.3321924321125,
-      "lon": 103.907363528438,
-      "postal": "410651"
-    },
-    {
-      "name": "136 PASIR RIS STREET 11",
-      "lat": 1.36468913188234,
-      "lon": 103.957950593135,
-      "postal": "510136"
-    },
-    {
-      "name": "207 PASIR RIS STREET 21",
-      "lat": 1.36630332942513,
-      "lon": 103.962287761409,
-      "postal": "510207"
-    },
-    {
-      "name": "252 PASIR RIS STREET 21",
-      "lat": 1.36817271834193,
-      "lon": 103.962563714825,
-      "postal": "510252"
-    },
-    {
-      "name": "454 PASIR RIS DRIVE 6",
-      "lat": 1.37200972461679,
-      "lon": 103.958089263401,
-      "postal": "510454"
-    },
-    {
-      "name": "482 PASIR RIS DRIVE 4",
-      "lat": 1.37375879162392,
-      "lon": 103.95971509662,
-      "postal": "510482"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.37310127825062,
-      "lon": 103.945674473619,
-      "postal": "510571"
-    },
-    {
-      "name": "634 PASIR RIS DRIVE 1",
-      "lat": 1.37757926860245,
-      "lon": 103.9406595852,
-      "postal": "510634"
-    },
-    {
-      "name": "741 PASIR RIS STREET 71",
-      "lat": 1.37755384677881,
-      "lon": 103.936383536913,
-      "postal": "510741"
-    },
-    {
-      "name": "243 SIMEI STREET 5",
-      "lat": 1.34395928033042,
-      "lon": 103.955168198066,
-      "postal": "520243"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.35191835181459,
-      "lon": 103.959646784075,
-      "postal": "520338"
-    },
-    {
-      "name": "364 TAMPINES STREET 34",
-      "lat": 1.35693800952142,
-      "lon": 103.959873498292,
-      "postal": "520364"
-    },
-    {
-      "name": "494B TAMPINES AVENUE 9",
-      "lat": 1.36300828940548,
-      "lon": 103.952704897502,
-      "postal": "520494"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.3588121878635,
-      "lon": 103.935212702172,
-      "postal": "520717"
-    },
-    {
-      "name": "487B TAMPINES STREET 45",
-      "lat": 1.36026524882674,
-      "lon": 103.958372350188,
-      "postal": "521487"
-    },
-    {
-      "name": "230B TAMPINES STREET 24",
-      "lat": 1.3553984846695,
-      "lon": 103.950733897054,
-      "postal": "525230"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.35660452934466,
-      "lon": 103.883650622241,
-      "postal": "530221"
-    },
-    {
-      "name": "435 HOUGANG AVENUE 8",
-      "lat": 1.37752800104625,
-      "lon": 103.89360316857,
-      "postal": "530435"
-    },
-    {
-      "name": "439 HOUGANG AVENUE 8",
-      "lat": 1.37859799173852,
-      "lon": 103.893427304657,
-      "postal": "530439"
-    },
-    {
-      "name": "449 HOUGANG AVENUE 10",
-      "lat": 1.37878098243894,
-      "lon": 103.895153601863,
-      "postal": "530449"
-    },
-    {
-      "name": "PCF SPARKLETOTS PRESCHOOL @ SENGKANG SOUTH BLK 535 (KN)",
-      "lat": 1.37644174333807,
-      "lon": 103.89013377594,
-      "postal": "530535"
-    },
-    {
-      "name": "553 HOUGANG STREET 51",
-      "lat": 1.37912950419349,
-      "lon": 103.890376362574,
-      "postal": "530553"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.36992238335483,
-      "lon": 103.890925005074,
-      "postal": "530836"
-    },
-    {
-      "name": "925 HOUGANG STREET 91",
-      "lat": 1.37670584605136,
-      "lon": 103.882497236424,
-      "postal": "530925"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.37453653802469,
-      "lon": 103.874596417848,
-      "postal": "550533"
-    },
-    {
-      "name": "617 ANG MO KIO AVENUE 4",
-      "lat": 1.37751709681128,
-      "lon": 103.838053184066,
-      "postal": "560617"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.35803232624061,
-      "lon": 103.848211390712,
-      "postal": "570222"
-    },
-    {
-      "name": "229 BISHAN STREET 23",
-      "lat": 1.35760846214532,
-      "lon": 103.84596290671,
-      "postal": "570229"
-    },
-    {
-      "name": "236 BISHAN STREET 22",
-      "lat": 1.35900490923943,
-      "lon": 103.847006575058,
-      "postal": "570236"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.36019474589915,
-      "lon": 103.84413136044,
-      "postal": "570245"
-    },
-    {
-      "name": "255 BISHAN STREET 22",
-      "lat": 1.36166764006371,
-      "lon": 103.842743222032,
-      "postal": "570255"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.35866825318856,
-      "lon": 103.842069711877,
-      "postal": "570264"
-    },
-    {
-      "name": "BISHAN HEIGHTS",
-      "lat": 1.35628009744133,
-      "lon": 103.845894054401,
-      "postal": "570293"
-    },
-    {
-      "name": "323 TAH CHING ROAD",
-      "lat": 1.3368180785281,
-      "lon": 103.723914562532,
-      "postal": "610323"
-    },
-    {
-      "name": "362 YUNG AN ROAD",
-      "lat": 1.33616155292127,
-      "lon": 103.719783396486,
-      "postal": "610362"
-    },
-    {
-      "name": "PCF SPARKLETOTS PRESCHOOL @ PIONEER 694 (CC)",
-      "lat": 1.34302581073029,
-      "lon": 103.706879612056,
-      "postal": "640694"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.34409760357644,
-      "lon": 103.696723900687,
-      "postal": "640716"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.34442696756266,
-      "lon": 103.698193963126,
-      "postal": "640723"
-    },
-    {
-      "name": "NANYANG SAPPHIRE",
-      "lat": 1.34555322187045,
-      "lon": 103.69876791478,
-      "postal": "640731"
-    },
-    {
-      "name": "GEK POH VILLE",
-      "lat": 1.34760958144611,
-      "lon": 103.699227740175,
-      "postal": "640751"
-    },
-    {
-      "name": "814 JURONG WEST STREET 81",
-      "lat": 1.34566786108845,
-      "lon": 103.695791563809,
-      "postal": "640814"
-    },
-    {
-      "name": "NANYANG PEARL",
-      "lat": 1.3427083627467,
-      "lon": 103.693576643138,
-      "postal": "640836"
-    },
-    {
-      "name": "859 JURONG WEST STREET 81",
-      "lat": 1.34923032309478,
-      "lon": 103.696100644272,
-      "postal": "640859"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.35149041858556,
-      "lon": 103.748701610843,
-      "postal": "650625"
-    },
-    {
-      "name": "NOAH'S ARK CHILDCARE & DEVELOPMENT CENTRE",
-      "lat": 1.38304692121235,
-      "lon": 103.770464368939,
-      "postal": "670439"
-    },
-    {
-      "name": "171A GANGSA ROAD",
-      "lat": 1.37921045305008,
-      "lon": 103.766373351511,
-      "postal": "671171"
-    },
-    {
-      "name": "MY FIRST SKOOL",
-      "lat": 1.3814779003875,
-      "lon": 103.748174139363,
-      "postal": "680208"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.38251530490517,
-      "lon": 103.745366946597,
-      "postal": "680219"
-    },
-    {
-      "name": "237 CHOA CHU KANG CENTRAL",
-      "lat": 1.3794475026281,
-      "lon": 103.748287395227,
-      "postal": "680237"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.37927183528093,
-      "lon": 103.74066488084,
-      "postal": "680289"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.38063288913608,
-      "lon": 103.737541643389,
-      "postal": "680447"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.39371134802136,
-      "lon": 103.743772016448,
-      "postal": "680544"
-    },
-    {
-      "name": "620 CHOA CHU KANG STREET 62",
-      "lat": 1.39957666181485,
-      "lon": 103.747100331609,
-      "postal": "680620"
-    },
-    {
-      "name": "660 CHOA CHU KANG CRESCENT",
-      "lat": 1.40102235751598,
-      "lon": 103.749862447053,
-      "postal": "680660"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.39461112561124,
-      "lon": 103.747911196374,
-      "postal": "680785"
-    },
-    {
-      "name": "368 WOODLANDS AVENUE 1",
-      "lat": 1.43294240133526,
-      "lon": 103.786732547129,
-      "postal": "730368"
-    },
-    {
-      "name": "HANIS MONTESSORI KINDERGARTEN (WOODLANDS)",
-      "lat": 1.42729302492584,
-      "lon": 103.774859396818,
-      "postal": "730424"
-    },
-    {
-      "name": "CARE CORNER FAMILY SERVICE CENTRE (ADMIRALTY)",
-      "lat": 1.44159550542694,
-      "lon": 103.801106488879,
-      "postal": "730718"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.44317276410265,
-      "lon": 103.795008218691,
-      "postal": "730747"
-    },
-    {
-      "name": "810 WOODLANDS STREET 81",
-      "lat": 1.44267221161224,
-      "lon": 103.788152306679,
-      "postal": "730810"
-    },
-    {
-      "name": "HDB PUBLIC SHELTERS",
-      "lat": 1.44479630064956,
-      "lon": 103.790602761905,
-      "postal": "730876"
-    },
-    {
-      "name": "LITTLE STARS ACADEMY (WOODLANDS)",
-      "lat": 1.43580504563585,
-      "lon": 103.795253989203,
-      "postal": "730899"
-    },
-    {
-      "name": "894B WOODLANDS DRIVE 50",
-      "lat": 1.43600943919705,
-      "lon": 103.789507492911,
-      "postal": "731894"
-    },
-    {
-      "name": "LAVENDER MRT STATION (EW11)",
+      "name": "Lavender MRT Station(East-West Line)",
       "lat": 1.30737781747063,
       "lon": 103.862767633888,
-      "postal": "208699"
+      "postalCode": "208699",
+      "address": "50 KALLANG ROAD"
     },
     {
-      "name": "FARRER PARK MRT STATION (NE8)",
-      "lat": 1.31190557325774,
-      "lon": 103.853477716509,
-      "postal": "218703"
+      "name": "City Hall MRT Station (North-South Line)",
+      "lat": 1.29298990700923,
+      "lon": 103.852542630339,
+      "postalCode": "179100",
+      "address": "150 NORTH BRIDGE ROAD"
     },
     {
-      "name": "BUANGKOK MRT STATION (NE15)",
-      "lat": 1.38287001971672,
-      "lon": 103.893122569706,
-      "postal": "545061"
+      "name": "Newton MRT Station (North-South Line)",
+      "lat": 1.31257031730604,
+      "lon": 103.838031555215,
+      "postalCode": "228234",
+      "address": "49 SCOTTS ROAD"
     },
     {
-      "name": "HAW PAR VILLA MRT STATION (CC25)",
-      "lat": 1.28257135772488,
-      "lon": 103.781752725064,
-      "postal": "117396"
+      "name": "Somerset MRT Station(North-South Line)",
+      "lat": 1.30026416739006,
+      "lon": 103.839085753124,
+      "postalCode": "238162",
+      "address": "1 SOMERSET ROAD"
     },
     {
-      "name": "MACPHERSON MRT STATION (DT26)",
-      "lat": 1.32615024457361,
-      "lon": 103.889298600376,
-      "postal": "378956"
+      "name": "Braddell MRT Station (North-South Line)",
+      "lat": 1.34010520696434,
+      "lon": 103.846755921048,
+      "postalCode": "319756",
+      "address": "377 LORONG 1 TOA PAYOH"
     },
     {
-      "name": "BISHAN MRT STATION (NS17)",
-      "lat": 1.35083898784737,
-      "lon": 103.848143964542,
-      "postal": "579827"
+      "name": "Marina Bay MRT Station (North-South Line)",
+      "lat": 1.27631114381584,
+      "lon": 103.854604975361,
+      "postalCode": "018925",
+      "address": "21 PARK STREET"
     },
     {
-      "name": "BEDOK RESERVOIR MRT STATION (DT30)",
+      "name": "Raffles Place MRT Station (North-South Line)",
+      "lat": 1.28412561043658,
+      "lon": 103.851461712342,
+      "postalCode": "048618",
+      "address": "5 RAFFLES PLACE"
+    },
+    {
+      "name": "Farrer Park MRT Station (North-East Line)",
+      "lat": 1.31314029963164,
+      "lon": 103.854754721344,
+      "postalCode": "218703",
+      "address": "250 RACE COURSE ROAD"
+    },
+    {
+      "name": "Little India MRT Station (North-East Line)",
+      "lat": 1.30724381608438,
+      "lon": 103.849841614124,
+      "postalCode": "229900",
+      "address": "60 BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "Boon Keng MRT Station (North-East Line)",
+      "lat": 1.31933570922514,
+      "lon": 103.861569454156,
+      "postalCode": "328260",
+      "address": "900 SERANGOON ROAD"
+    },
+    {
+      "name": "Potong Pasir MRT Station (North-East Line)",
+      "lat": 1.33137808528793,
+      "lon": 103.869363547741,
+      "postalCode": "347694",
+      "address": "55 UPPER SERANGOON ROAD"
+    },
+    {
+      "name": "Woodleigh MRT Station (North-East Line)",
+      "lat": 1.33982824592182,
+      "lon": 103.87096088798,
+      "postalCode": "347695",
+      "address": "400 UPPER SERANGOON ROAD"
+    },
+    {
+      "name": "Kovan MRT Station (North-East Line)",
+      "lat": 1.35990191952976,
+      "lon": 103.884494725197,
+      "postalCode": "534799",
+      "address": "900 UPPER SERANGOON ROAD"
+    },
+    {
+      "name": "Hougang MRT Station (North-East Line)",
+      "lat": 1.37129226620797,
+      "lon": 103.892380513029,
+      "postalCode": "538758",
+      "address": "80 HOUGANG CENTRAL"
+    },
+    {
+      "name": "Buangkok  MRT Station (North-East Line)",
+      "lat": 1.38369417199994,
+      "lon": 103.893049981318,
+      "postalCode": "545061",
+      "address": "10 SENGKANG CENTRAL"
+    },
+    {
+      "name": "Serangoon MRT Station (North-East Line)",
+      "lat": 1.3510482896351,
+      "lon": 103.871070417199,
+      "postalCode": "556082",
+      "address": "21 SERANGOON CENTRAL"
+    },
+    {
+      "name": "Chinatown MRT Station (North-East Line)",
+      "lat": 1.2839640518753,
+      "lon": 103.843141945391,
+      "postalCode": "059443",
+      "address": "151 NEW BRIDGE ROAD"
+    },
+    {
+      "name": "Clarke Quay MRT Station (North-East Line)",
+      "lat": 1.28745211415803,
+      "lon": 103.846119192727,
+      "postalCode": "059815",
+      "address": "10 EU TONG SEN STREET"
+    },
+    {
+      "name": "Outram Park MRT Station (North-East Line)",
+      "lat": 1.27972059383553,
+      "lon": 103.839439862425,
+      "postalCode": "059816",
+      "address": "300 EU TONG SEN STREET"
+    },
+    {
+      "name": "Labrador Park MRT Station (Circle Line)",
+      "lat": 1.27236838626952,
+      "lon": 103.803416232089,
+      "postalCode": "109029",
+      "address": "701 TELOK BLANGAH ROAD"
+    },
+    {
+      "name": "Haw Par Villa MRT Station (Circle Line)",
+      "lat": 1.28195688684898,
+      "lon": 103.781988990137,
+      "postalCode": "117396",
+      "address": "270 PASIR PANJANG ROAD"
+    },
+    {
+      "name": "Buona Vista MRT Station (Circle Line)",
+      "lat": 1.30663450405,
+      "lon": 103.790709404436,
+      "postalCode": "139350",
+      "address": "150 NORTH BUONA VISTA ROAD"
+    },
+    {
+      "name": "Botanic Gardens MRT Station (Circle Line)",
+      "lat": 1.32238699517166,
+      "lon": 103.815385463093,
+      "postalCode": "259777",
+      "address": "100 CLUNY PARK ROAD"
+    },
+    {
+      "name": "Caldecott MRT Station (Circle Line)",
+      "lat": 1.33734722320212,
+      "lon": 103.839544077561,
+      "postalCode": "298113",
+      "address": "38 TOA PAYOH RISE"
+    },
+    {
+      "name": "Macpherson MRT Station (Circle Line)",
+      "lat": 1.32683963232487,
+      "lon": 103.890007860464,
+      "postalCode": "378956",
+      "address": "171 PAYA LEBAR ROAD"
+    },
+    {
+      "name": "Dakota MRT Station (Circle Line)",
+      "lat": 1.30843144331463,
+      "lon": 103.889268208422,
+      "postalCode": "397973",
+      "address": "201 OLD AIRPORT ROAD"
+    },
+    {
+      "name": "Mountbatten MRT Station (Circle Line)",
+      "lat": 1.30620190525331,
+      "lon": 103.882528081052,
+      "postalCode": "398006",
+      "address": "301 MOUNTBATTEN ROAD"
+    },
+    {
+      "name": "Bartley MRT Station (Circle Line)",
+      "lat": 1.3424454382925,
+      "lon": 103.880197087117,
+      "postalCode": "539788",
+      "address": "90 BARTLEY ROAD"
+    },
+    {
+      "name": "Lorong Chuan MRT Station (Circle Line)",
+      "lat": 1.35153128621585,
+      "lon": 103.864812169514,
+      "postalCode": "554533",
+      "address": "150 SERANGOON AVENUE 3"
+    },
+    {
+      "name": "Bishan MRT Station (Circle Line)",
+      "lat": 1.35101889777844,
+      "lon": 103.850057208608,
+      "postalCode": "579827",
+      "address": "17 BISHAN PLACE"
+    },
+    {
+      "name": "Tan Kah Kee MRT Station (Downtown Line)",
+      "lat": 1.32639224146351,
+      "lon": 103.806548201692,
+      "postalCode": "266268",
+      "address": "651 BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "Sixth Avenue MRT Station (Downtown Line)",
+      "lat": 1.33081856819778,
+      "lon": 103.796767723238,
+      "postalCode": "269784",
+      "address": "777 BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "Geylang Bahru MRT Station  (Downtown Line)",
+      "lat": 1.32130110228321,
+      "lon": 103.871622627142,
+      "postalCode": "339355",
+      "address": "541 KALLANG BAHRU"
+    },
+    {
+      "name": "Bedok Reservoir MRT Station (Downtown Line)",
       "lat": 1.33660782955099,
       "lon": 103.932234623286,
-      "postal": "469724"
+      "postalCode": "469724",
+      "address": "371 BEDOK NORTH AVENUE 3"
     },
     {
-      "name": "BEAUTY WORLD MRT STATION (DT5)",
-      "lat": 1.34122317558549,
-      "lon": 103.775794285083,
-      "postal": "588216"
+      "name": "Bedok North MRT Station (Downtown Line)",
+      "lat": 1.33474211664091,
+      "lon": 103.91797832995,
+      "postalCode": "479481",
+      "address": "651 BEDOK NORTH ROAD"
     },
     {
-      "name": "LENTOR MRT STATION (TE5)",
+      "name": "Expo MRT Station (Downtown Line)",
+      "lat": 1.33538252614956,
+      "lon": 103.962374747451,
+      "postalCode": "485985",
+      "address": "2 EXPO DRIVE"
+    },
+    {
+      "name": "Upper Changi MRT Station (Downtown Line)",
+      "lat": 1.34173977444995,
+      "lon": 103.961472788634,
+      "postalCode": "485990",
+      "address": "690 UPPER CHANGI ROAD EAST"
+    },
+    {
+      "name": "Tampines MRT Station (Downtown Line)",
+      "lat": 1.35619148271544,
+      "lon": 103.9546344625,
+      "postalCode": "529544",
+      "address": "20 TAMPINES AVENUE 7"
+    },
+    {
+      "name": "Tampines East MRT Station (Downtown Line)",
+      "lat": 1.35619148271544,
+      "lon": 103.9546344625,
+      "postalCode": "529623",
+      "address": "20 TAMPINES AVENUE 7"
+    },
+    {
+      "name": "Tampines West MRT Station (Downtown Line)",
+      "lat": 1.34551530560119,
+      "lon": 103.938436971222,
+      "postalCode": "529683",
+      "address": "2 TAMPINES AVENUE 4"
+    },
+    {
+      "name": "Beauty World MRT Station (Downtown Line)",
+      "lat": 1.34182516790298,
+      "lon": 103.775923824549,
+      "postalCode": "588216",
+      "address": "101 UPPER BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "King Albert Park MRT Station (Downtown Line)",
+      "lat": 1.335893496278,
+      "lon": 103.783235863233,
+      "postalCode": "599987",
+      "address": "2 BLACKMORE DRIVE"
+    },
+    {
+      "name": "Hillview MRT Station (Downtown Line)",
+      "lat": 1.36288845715168,
+      "lon": 103.767780907707,
+      "postalCode": "678211",
+      "address": "510 UPPER BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "Bukit Panjang MRT Station (Downtown Line)",
+      "lat": 1.37956121236613,
+      "lon": 103.761188866252,
+      "postalCode": "678213",
+      "address": "950 UPPER BUKIT TIMAH ROAD"
+    },
+    {
+      "name": "Cashew MRT Station (Downtown Line)",
+      "lat": 1.36984601365741,
+      "lon": 103.764315051619,
+      "postalCode": "679696",
+      "address": "1 CASHEW ROAD"
+    },
+    {
+      "name": "Woodlands MRT Station (Thomson-East Coast Line)",
+      "lat": 1.43605761708128,
+      "lon": 103.787938777173,
+      "postalCode": "737736",
+      "address": "11 WOODLANDS SQUARE"
+    },
+    {
+      "name": "Mayflower MRT Station (Thomson-East Coast Line)",
+      "lat": 1.37146318831015,
+      "lon": 103.836567766945,
+      "postalCode": "569900",
+      "address": "91 ANG MO KIO AVENUE 4"
+    },
+    {
+      "name": "Bright Hill MRT Station (Thomson-East Coast Line)",
+      "lat": 1.36328318545185,
+      "lon": 103.832893619992,
+      "postalCode": "575737",
+      "address": "100 SIN MING AVENUE"
+    },
+    {
+      "name": "Lentor MRT Station (Thomson-East Coast Line)",
       "lat": 1.38550657972169,
       "lon": 103.835743809669,
-      "postal": "789361"
+      "postalCode": "789361",
+      "address": "1 LENTOR DRIVE"
     },
     {
-      "name": "SIGLAP MRT STATION (TE28)",
+      "name": "Mount Pleasant MRT Station (Thomson-East Coast Line)",
+      "lat": 1.32856455460666,
+      "lon": 103.83518858199,
+      "postalCode": "299781",
+      "address": "14 DENHAM ROAD"
+    },
+    {
+      "name": "Gardens By The Bay MRT Station (Thomson-East Coast Line)",
+      "lat": 1.28056977867553,
+      "lon": 103.868846533132,
+      "postalCode": "019396",
+      "address": "11 MARINA MALL"
+    },
+    {
+      "name": "Tanjong Rhu MRT Station (Thomson-East Coast Line)",
+      "lat": 1.29726507940646,
+      "lon": 103.873453254621,
+      "postalCode": "436488",
+      "address": "2 TANJONG RHU PLACE"
+    },
+    {
+      "name": "Marine Parade MRT Station (Thomson-East Coast Line)",
+      "lat": 1.30261163483383,
+      "lon": 103.904983086812,
+      "postalCode": "449971",
+      "address": "101 MARINE PARADE ROAD"
+    },
+    {
+      "name": "Marine Terrace MRT Station (Thomson-East Coast Line)",
+      "lat": 1.30666510344814,
+      "lon": 103.9151067005,
+      "postalCode": "449970",
+      "address": "304 MARINE PARADE ROAD"
+    },
+    {
+      "name": "Siglap MRT Station (Thomson-East Coast Line)",
       "lat": 1.31000869432289,
       "lon": 103.930025826708,
-      "postal": "449969"
+      "postalCode": "449969",
+      "address": "1000 MARINE PARADE ROAD"
     },
     {
-      "name": "ACCOUNTING AND CORPORATE REGULATORY AUTHORITY (ACRA)",
-      "lat": 1.31978249878705,
-      "lon": 103.842142960008,
-      "postal": "307987"
+      "name": "Bayshore MRT Station (Thomson-East Coast Line)",
+      "lat": 1.31312248291264,
+      "lon": 103.942309776767,
+      "postalCode": "469958",
+      "address": "31 BAYSHORE ROAD"
     },
     {
-      "name": "NEW TOWN SECONDARY SCHOOL",
-      "lat": 1.30977590011357,
-      "lon": 103.77318863421,
-      "postal": "139657"
-    },
-    {
-      "name": "ANGLO-CHINESE SCHOOL (JUNIOR)",
-      "lat": 1.30935041274966,
-      "lon": 103.840950265464,
-      "postal": "227988"
-    },
-    {
-      "name": "DUNMAN HIGH SCHOOL",
-      "lat": 1.29996216014962,
-      "lon": 103.88294155989,
-      "postal": "436895"
-    },
-    {
-      "name": "MERIDIAN SECONDARY SCHOOL",
-      "lat": 1.3672468492013,
-      "lon": 103.948972483629,
-      "postal": "518901"
-    },
-    {
-      "name": "CHANGKAT CHANGI SECONDARY SCHOOL",
-      "lat": 1.33950630072876,
-      "lon": 103.953245525564,
-      "postal": "529894"
-    },
-    {
-      "name": "SAINT GABRIEL'S SECONDARY SCHOOL",
-      "lat": 1.34648798732177,
-      "lon": 103.876094163287,
-      "postal": "556140"
-    },
-    {
-      "name": "PEIRCE SECONDARY SCHOOL",
-      "lat": 1.36665944653812,
-      "lon": 103.83021606804,
-      "postal": "575566"
-    },
-    {
-      "name": "ONE WORLD INTERNATIONAL SCHOOL (NANYANG CAMPUS)",
-      "lat": 1.34761307060846,
-      "lon": 103.694769257465,
-      "postal": "649075"
-    },
-    {
-      "name": "UNITY SECONDARY SCHOOL",
-      "lat": 1.40001524119441,
-      "lon": 103.74602091483,
-      "postal": "689143"
-    },
-    {
-      "name": "ORCHID PARK SECONDARY SCHOOL",
-      "lat": 1.41532032779634,
-      "lon": 103.837859241343,
-      "postal": "768454"
+      "name": "Habourfront MRT Station (North-East Line)",
+      "lat": 1.2653,
+      "lon": 103.8222,
+      "postalCode": "098867",
+      "address": "81 Telok Blangah Road"
     }
   ]
 }

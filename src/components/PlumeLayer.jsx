@@ -8,7 +8,7 @@ export const PlumeLayer = ({ incidents, wind, isNightMode, selectedIncidentId })
         const features = [];
 
         incidents.forEach(inc => {
-            const stability = isNightMode ? 'F' : 'D'; 
+            const stability = wind.stabilityClass || (isNightMode ? 'F' : 'D'); 
             const baseQ = CHEMICAL_Q_RATES[inc.details?.type] || CHEMICAL_Q_RATES.CHLORINE_GAS; 
             const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
             const Q = baseQ * Math.pow(massRatio, 1.25);

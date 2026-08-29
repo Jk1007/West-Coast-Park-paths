@@ -5,12 +5,12 @@
 
 // Researched Empirical Limits
 const PASQUILL_GIFFORD = {
-    D: { // Neutral atmospheric stability
-        a: 0.128, b: 0.90, c: 32.093, d: 0.81066
-    },
-    F: { // Extremely Stable (Night Inversion)
-        a: 0.067, b: 0.90, c: 14.823, d: 0.54503
-    }
+    A: { a: 0.320, b: 0.90, c: 200.0, d: 1.50000 },
+    B: { a: 0.220, b: 0.90, c: 120.0, d: 1.10000 },
+    C: { a: 0.160, b: 0.90, c: 60.0,  d: 0.91000 },
+    D: { a: 0.128, b: 0.90, c: 32.093, d: 0.81066 },
+    E: { a: 0.090, b: 0.90, c: 22.0,  d: 0.65000 },
+    F: { a: 0.067, b: 0.90, c: 14.823, d: 0.54503 }
 };
 
 /**

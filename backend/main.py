@@ -83,9 +83,7 @@ async def fetch_wind_loop():
     }
     
     STATION_CONFIG = {
-        'S50': 3,   # Clementi Road (Closest)
-        'S60': 2,   # Sentosa
-        'S117': 1   # Banyan Road
+        'S116': 1,  # West Coast Highway (Exact Match for myENV)
     }
     
     while True:
@@ -133,12 +131,17 @@ async def fetch_wind_loop():
                                 sid = s["stationId"]
                                 if sid in STATION_CONFIG:
                                     w = STATION_CONFIG[sid]
-                                    v_sum += float(s["value"]) * w
+                                    val = float(s["value"])
+                                    if key == "speed":
+                                        val *= 1.852 # Convert knots to km/h
+                                    v_sum += val * w
                                     w_sum += w
                             
                             if w_sum == 0: # Fallback
-                                val = stations[0]["value"]
-                                new_wind[key] = float(val)
+                                val = float(stations[0]["value"])
+                                if key == "speed":
+                                    val *= 1.852
+                                new_wind[key] = val
                             else:
                                 new_wind[key] = float(v_sum / w_sum)
                         

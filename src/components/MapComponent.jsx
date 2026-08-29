@@ -146,7 +146,7 @@ const MapComponent = forwardRef(({
             let foundInc = null;
 
             for (const inc of incidents) {
-                const stability = isNightMode ? 'F' : 'D';
+                const stability = wind.stabilityClass || (isNightMode ? 'F' : 'D');
                 const baseQ = CHEMICAL_Q_RATES[inc.details?.type] || CHEMICAL_Q_RATES.CHLORINE_GAS; 
                 const massRatio = Math.max(0.02, (inc.details?.amount || 100) / 200);
                 const Q = baseQ * Math.pow(massRatio, 1.25);
@@ -527,7 +527,7 @@ const MapComponent = forwardRef(({
                         } else if (currentStep === null) {
                             // --- NAVIGATION MODE ---
                             // 2. PAN LOGIC (Hand Index Finger)
-                            const ALPHA = 0.05; // Smooth index finger coordinate change
+                            const ALPHA = 0.35; // Increased for snappier response
                             stateRef.current.smoothedIndex.x += ALPHA * (data.targetX - stateRef.current.smoothedIndex.x);
                             stateRef.current.smoothedIndex.y += ALPHA * (data.targetY - stateRef.current.smoothedIndex.y);
                             const sIndex = stateRef.current.smoothedIndex;
@@ -535,18 +535,18 @@ const MapComponent = forwardRef(({
                             if (stateRef.current.prevIndex) {
                                 const dx = sIndex.x - stateRef.current.prevIndex.x;
                                 const dy = sIndex.y - stateRef.current.prevIndex.y;
-                                const PAN_SENSITIVITY = 0.15; // LOWERED sensitivity
+                                const PAN_SENSITIVITY = 0.25; // Adjusted sensitivity
                                 const offsetX = -dx * PAN_SENSITIVITY;
                                 const offsetY = -dy * PAN_SENSITIVITY;
 
-                                if (Math.abs(offsetX) > 0.8 || Math.abs(offsetY) > 0.8) {
+                                if (Math.abs(offsetX) > 0.1 || Math.abs(offsetY) > 0.1) {
                                     map.panBy([offsetX, offsetY], { animate: false });
                                 }
                             }
                             stateRef.current.prevIndex = { x: sIndex.x, y: sIndex.y };
 
                             // 3. ZOOM LOGIC (Thumb to Index Distance)
-                            const ZOOM_ALPHA = 0.05; 
+                            const ZOOM_ALPHA = 0.35; 
                             stateRef.current.smoothedDistance = stateRef.current.smoothedDistance === 0 
                                 ? data.dist 
                                 : stateRef.current.smoothedDistance + ZOOM_ALPHA * (data.dist - stateRef.current.smoothedDistance);
@@ -554,8 +554,8 @@ const MapComponent = forwardRef(({
 
                             if (stateRef.current.prevDistance !== null) {
                                 const dDist = sDist - stateRef.current.prevDistance;
-                                const ZOOM_SENSITIVITY = 2.5; // LOWERED sensitivity
-                                if (Math.abs(dDist) > 0.005) { 
+                                const ZOOM_SENSITIVITY = 4.0; 
+                                if (Math.abs(dDist) > 0.001) { 
                                     const currentZoom = map.getZoom();
                                     map.jumpTo({ zoom: currentZoom + (dDist * ZOOM_SENSITIVITY), center: map.getCenter() });
                                 }
@@ -739,7 +739,7 @@ const MapComponent = forwardRef(({
         const features = agents.map(a => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [a.position[0], a.position[1]] },
-            properties: { id: a.id, state: a.state, isExposed: a.isExposed }
+            properties: { id: a.id, state: a.state, isExposed: a.isExposed === true }
         }));
         return { type: 'FeatureCollection', features };
     }, [agents]);
@@ -776,7 +776,8 @@ const MapComponent = forwardRef(({
     }, [safeNodes]);
 
     const cdSheltersGeoJSON = useMemo(() => {
-        const shelters = SheltersData.shelters || [];
+        // Only include MRT stations as safe zones per user request
+        const shelters = (SheltersData.shelters || []).filter(s => s.name && s.name.toUpperCase().includes('MRT'));
         if (shelters.length === 0) return null;
         
         const features = shelters.map((s, idx) => ({
